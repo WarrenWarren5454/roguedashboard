@@ -47,39 +47,55 @@ echo "[*] Starting hostapd..."
 echo "[DEBUG] Running hostapd with config:"
 cat hostapd.conf
 
-sudo hostapd hostapd.conf &
-HOSTAPD_PID=$!
-sleep 2
+# Create control interface directory
+sudo mkdir -p /var/run/hostapd
+sudo chmod 777 /var/run/hostapd
+
+# Start hostapd with control interface
+sudo hostapd -B -P /var/run/hostapd/pid -i $IFACE hostapd.conf
+HOSTAPD_PID=$(cat /var/run/hostapd/pid)
+echo "[DEBUG] Hostapd PID: $HOSTAPD_PID"
+
+# Wait for hostapd to fully start
+echo "[DEBUG] Waiting for hostapd to initialize..."
+for i in {1..10}; do
+    if sudo hostapd_cli -i $IFACE status >/dev/null 2>&1; then
+        echo "[DEBUG] Hostapd is ready"
+        break
+    fi
+    echo "[DEBUG] Waiting for hostapd... attempt $i/10"
+    sleep 1
+done
 
 # Monitor hostapd events
 echo "[*] Setting up hostapd event monitoring..."
 monitor_hostapd_events() {
     echo "[DEBUG] Starting hostapd event monitoring..."
-    # Wait for control interface to be ready
-    sleep 2
-    
-    # Use hostapd_cli to monitor events
-    sudo hostapd_cli -i $IFACE -B
     
     # Start monitoring loop
     while true; do
-        sudo hostapd_cli -i $IFACE status > /dev/null 2>&1
-        if [ $? -ne 0 ]; then
-            echo "[DEBUG] hostapd_cli failed, retrying in 5 seconds..."
+        if ! sudo hostapd_cli -i $IFACE status >/dev/null 2>&1; then
+            echo "[DEBUG] Hostapd not responding, waiting..."
             sleep 5
             continue
         fi
         
-        sudo hostapd_cli -i $IFACE all_sta | while read -r line; do
-            if [[ $line =~ ^([0-9A-Fa-f:]{17}) ]]; then
-                mac="${BASH_REMATCH[1]}"
-                # Send connect event for each active station
-                curl -s -X POST -H "Content-Type: application/json" \
-                     -d "{\"type\":\"connect\",\"mac\":\"$mac\"}" \
-                     http://localhost:443/api/events
-                echo "[DEBUG] Sent connect event for $mac"
-            fi
-        done
+        # Get list of connected stations
+        STATIONS=$(sudo hostapd_cli -i $IFACE all_sta 2>/dev/null)
+        if [ $? -eq 0 ]; then
+            echo "$STATIONS" | while read -r line; do
+                if [[ $line =~ ^([0-9A-Fa-f:]{17}) ]]; then
+                    mac="${BASH_REMATCH[1]}"
+                    # Send connect event for each active station
+                    curl -s -X POST -H "Content-Type: application/json" \
+                         -d "{\"type\":\"connect\",\"mac\":\"$mac\"}" \
+                         http://localhost:443/api/events
+                    echo "[DEBUG] Sent connect event for $mac"
+                fi
+            done
+        else
+            echo "[DEBUG] Failed to get station list"
+        fi
         
         sleep 5
     done &
