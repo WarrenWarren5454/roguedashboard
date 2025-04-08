@@ -81,6 +81,7 @@ def connections_api():
         print(f"[DEBUG] hostapd_cli return code: {hostapd_cli.returncode}")
         print(f"[DEBUG] hostapd_cli output: {hostapd_cli.stdout}")
         
+        # Only track currently connected clients from hostapd
         connected_clients = {}
         current_mac = None
         
@@ -89,14 +90,13 @@ def connections_api():
                 line = line.strip()
                 if re.match(r'^[0-9A-Fa-f:]{17}$', line):
                     current_mac = line
-                    print(f"[DEBUG] Found MAC address: {current_mac}")
+                    print(f"[DEBUG] Found connected MAC address: {current_mac}")
                     connected_clients[current_mac] = {
                         'mac_address': current_mac,
                         'signal_strength': None,
                         'connected_time': None,
                         'rx_bytes': None,
-                        'tx_bytes': None,
-                        'is_connected': True
+                        'tx_bytes': None
                     }
                 elif current_mac and '=' in line:
                     key, value = line.split('=', 1)
@@ -111,66 +111,61 @@ def connections_api():
                     elif key == 'signal':
                         connected_clients[current_mac]['signal_strength'] = int(value)
 
-        print(f"[DEBUG] Connected clients after hostapd: {connected_clients}")
+        # Only proceed with clients that are currently connected according to hostapd
+        if not connected_clients:
+            print("[DEBUG] No connected clients found")
+            return jsonify([])
 
-        # Get DHCP leases from dnsmasq.leases
-        print("[DEBUG] Checking dnsmasq.leases file...")
+        print(f"[DEBUG] Found {len(connected_clients)} connected clients")
+
+        # Add DHCP info only for currently connected clients
         if os.path.exists('/var/lib/misc/dnsmasq.leases'):
-            print("[DEBUG] Found dnsmasq.leases file")
             with open('/var/lib/misc/dnsmasq.leases', 'r') as f:
                 leases_content = f.read()
-                print(f"[DEBUG] dnsmasq.leases content: {leases_content}")
+                print(f"[DEBUG] Reading DHCP leases for connected clients")
                 for line in leases_content.split('\n'):
                     parts = line.strip().split()
                     if len(parts) >= 4:
                         timestamp, mac, ip, hostname = parts[0:4]
-                        print(f"[DEBUG] Found lease: timestamp={timestamp}, mac={mac}, ip={ip}, hostname={hostname}")
-                        if mac not in connected_clients:
-                            connected_clients[mac] = {
-                                'mac_address': mac,
-                                'signal_strength': None,
-                                'connected_time': None,
-                                'rx_bytes': None,
-                                'tx_bytes': None,
-                                'is_connected': False
-                            }
-                        connected_clients[mac].update({
-                            'ip_address': ip,
-                            'hostname': hostname,
-                            'lease_timestamp': datetime.fromtimestamp(int(timestamp)).isoformat()
-                        })
+                        # Only add DHCP info for clients that are currently connected
+                        if mac in connected_clients:
+                            print(f"[DEBUG] Found DHCP lease for connected client: {mac}")
+                            connected_clients[mac].update({
+                                'ip_address': ip,
+                                'hostname': hostname,
+                                'lease_timestamp': datetime.fromtimestamp(int(timestamp)).isoformat()
+                            })
 
-        # Convert connected_time to human-readable format and calculate transfer rates
+        # Format output for connected clients
         result = []
         for client in connected_clients.values():
-            if 'ip_address' in client:
-                if client['is_connected'] and client['connected_time']:
-                    minutes = client['connected_time'] // 60
-                    hours = minutes // 60
-                    minutes = minutes % 60
-                    client['connection_duration'] = f"{hours}h {minutes}m"
-                else:
-                    client['connection_duration'] = "Disconnected"
-                
-                if client['rx_bytes'] and client['tx_bytes']:
-                    client['rx_mb'] = round(client['rx_bytes'] / (1024 * 1024), 2)
-                    client['tx_mb'] = round(client['tx_bytes'] / (1024 * 1024), 2)
-                else:
-                    client['rx_mb'] = 0
-                    client['tx_mb'] = 0
-                
-                if client['signal_strength']:
-                    client['signal_dbm'] = f"{client['signal_strength']} dBm"
-                else:
-                    client['signal_dbm'] = "N/A"
-                
-                # Clean up internal fields
-                for field in ['connected_time', 'rx_bytes', 'tx_bytes', 'signal_strength', 'is_connected']:
-                    client.pop(field, None)
-                
-                result.append(client)
+            if client['connected_time'] is not None:
+                minutes = client['connected_time'] // 60
+                hours = minutes // 60
+                minutes = minutes % 60
+                client['connection_duration'] = f"{hours}h {minutes}m"
+            else:
+                client['connection_duration'] = "Just connected"
+            
+            if client['rx_bytes'] and client['tx_bytes']:
+                client['rx_mb'] = round(client['rx_bytes'] / (1024 * 1024), 2)
+                client['tx_mb'] = round(client['tx_bytes'] / (1024 * 1024), 2)
+            else:
+                client['rx_mb'] = 0
+                client['tx_mb'] = 0
+            
+            if client['signal_strength']:
+                client['signal_dbm'] = f"{client['signal_strength']} dBm"
+            else:
+                client['signal_dbm'] = "N/A"
+            
+            # Clean up internal fields
+            for field in ['connected_time', 'rx_bytes', 'tx_bytes', 'signal_strength']:
+                client.pop(field, None)
+            
+            result.append(client)
 
-        print(f"[DEBUG] Final result: {result}")
+        print(f"[DEBUG] Returning {len(result)} connected clients")
         return jsonify(result)
     except Exception as e:
         print(f"[DEBUG] Error in connections_api: {str(e)}")
