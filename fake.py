@@ -80,6 +80,7 @@ def connections_api():
     try:
         print("[DEBUG] Starting connections_api()")
         result = []
+        current_time = int(time.time())
         
         # Get DHCP leases for connected clients
         if os.path.exists('/var/lib/misc/dnsmasq.leases'):
@@ -90,16 +91,30 @@ def connections_api():
                     parts = line.strip().split()
                     if len(parts) >= 4:
                         timestamp, mac, ip, hostname = parts[0:4]
-                        client_info = {
-                            'mac': mac,
-                            'ip': ip,
-                            'hostname': hostname,
-                            'connected_since': int(timestamp),
-                            'rx_mb': connected_clients.get(mac, {}).get('rx_mb', 0),
-                            'tx_mb': connected_clients.get(mac, {}).get('tx_mb', 0),
-                            'status': 'Connected' if mac in connected_clients and connected_clients[mac]['connected'] else 'Disconnected'
-                        }
-                        result.append(client_info)
+                        try:
+                            lease_time = int(timestamp)
+                            # Skip entries with invalid timestamps (before 2020)
+                            if lease_time < 1577836800:  # Jan 1, 2020
+                                continue
+                                
+                            is_connected = mac in connected_clients and connected_clients[mac]['connected']
+                            
+                            # Only show entries from the last 24 hours
+                            if current_time - lease_time <= 86400:
+                                client_info = {
+                                    'mac': mac,
+                                    'ip': ip,
+                                    'hostname': hostname,
+                                    'connected_since': lease_time,
+                                    'rx_mb': connected_clients.get(mac, {}).get('rx_mb', 0),
+                                    'tx_mb': connected_clients.get(mac, {}).get('tx_mb', 0),
+                                    'status': 'Connected' if is_connected else 'Disconnected'
+                                }
+                                result.append(client_info)
+                                print(f"[DEBUG] Added client {mac} (Connected: {is_connected})")
+                        except (ValueError, TypeError) as e:
+                            print(f"[DEBUG] Skipping invalid lease entry: {line} ({str(e)})")
+                            continue
 
         print(f"[DEBUG] Returning {len(result)} clients")
         return jsonify(result)
@@ -112,20 +127,19 @@ def connections_api():
 
 # Event handlers for hostapd events
 def handle_client_connect(mac):
-    print(f"[DEBUG] Client connected: {mac}")
     connected_clients[mac] = {
         'connected': True,
         'connect_time': time.time(),
         'duration': 'Just connected',
-        'signal_dbm': 'N/A',
         'rx_mb': 0,
         'tx_mb': 0
     }
+    print(f"[DEBUG] Updated client state for {mac}: {connected_clients[mac]}")
 
 def handle_client_disconnect(mac):
-    print(f"[DEBUG] Client disconnected: {mac}")
     if mac in connected_clients:
         connected_clients[mac]['connected'] = False
+        print(f"[DEBUG] Marked client {mac} as disconnected")
 
 def update_client_durations():
     current_time = time.time()
@@ -144,12 +158,21 @@ def before_request():
 # Event handler route for hostapd events
 @app.route('/api/events', methods=['POST'])
 def handle_event():
-    event = request.json
-    if event['type'] == 'connect':
-        handle_client_connect(event['mac'])
-    elif event['type'] == 'disconnect':
-        handle_client_disconnect(event['mac'])
-    return jsonify({'status': 'ok'})
+    try:
+        event = request.json
+        print(f"[DEBUG] Received event: {event}")
+        
+        if event['type'] == 'connect':
+            handle_client_connect(event['mac'])
+            print(f"[DEBUG] Client connected: {event['mac']}")
+        elif event['type'] == 'disconnect':
+            handle_client_disconnect(event['mac'])
+            print(f"[DEBUG] Client disconnected: {event['mac']}")
+            
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        print(f"[DEBUG] Error in handle_event: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 # Serve React static files
 @app.route('/dashboard/static/js/<path:filename>')

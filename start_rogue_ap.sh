@@ -47,26 +47,43 @@ echo "[*] Starting hostapd..."
 echo "[DEBUG] Running hostapd with config:"
 cat hostapd.conf
 
+sudo hostapd hostapd.conf &
+HOSTAPD_PID=$!
+sleep 2
+
+# Monitor hostapd events
+echo "[*] Setting up hostapd event monitoring..."
 monitor_hostapd_events() {
-    # Monitor hostapd events and send them to Flask server
     echo "[DEBUG] Starting hostapd event monitoring..."
-    sudo hostapd_cli -i $IFACE -a /bin/bash -c '
-        while read line; do
-            if echo "$line" | grep -q "AP-STA-CONNECTED"; then
-                mac=$(echo "$line" | grep -o "[0-9a-f:]\{17\}")
-                curl -X POST -H "Content-Type: application/json" -d "{\"type\":\"connect\",\"mac\":\"$mac\"}" http://localhost:443/api/events
+    # Wait for control interface to be ready
+    sleep 2
+    
+    # Use hostapd_cli to monitor events
+    sudo hostapd_cli -i $IFACE -B
+    
+    # Start monitoring loop
+    while true; do
+        sudo hostapd_cli -i $IFACE status > /dev/null 2>&1
+        if [ $? -ne 0 ]; then
+            echo "[DEBUG] hostapd_cli failed, retrying in 5 seconds..."
+            sleep 5
+            continue
+        fi
+        
+        sudo hostapd_cli -i $IFACE all_sta | while read -r line; do
+            if [[ $line =~ ^([0-9A-Fa-f:]{17}) ]]; then
+                mac="${BASH_REMATCH[1]}"
+                # Send connect event for each active station
+                curl -s -X POST -H "Content-Type: application/json" \
+                     -d "{\"type\":\"connect\",\"mac\":\"$mac\"}" \
+                     http://localhost:443/api/events
                 echo "[DEBUG] Sent connect event for $mac"
-            elif echo "$line" | grep -q "AP-STA-DISCONNECTED"; then
-                mac=$(echo "$line" | grep -o "[0-9a-f:]\{17\}")
-                curl -X POST -H "Content-Type: application/json" -d "{\"type\":\"disconnect\",\"mac\":\"$mac\"}" http://localhost:443/api/events
-                echo "[DEBUG] Sent disconnect event for $mac"
             fi
         done
-    ' &
+        
+        sleep 5
+    done &
 }
-
-sudo hostapd hostapd.conf &
-sleep 2
 
 # Start monitoring hostapd events
 monitor_hostapd_events
