@@ -6,9 +6,13 @@ import os
 import ast
 import subprocess
 import re
+import time
 
 app = Flask(__name__, static_folder='static')  # Set the static folder explicitly
 CORS(app)  # Enable CORS for development
+
+# Global dictionary to track connected clients
+connected_clients = {}
 
 # Ensure creds directory exists
 if not os.path.exists('creds'):
@@ -75,95 +79,31 @@ def creds_api():
 def connections_api():
     try:
         print("[DEBUG] Starting connections_api()")
-        # Get connected clients from hostapd with detailed information
-        print("[DEBUG] Running hostapd_cli command...")
-        hostapd_cli = subprocess.run(['hostapd_cli', '-i', 'wlan0', '-p', '/var/run/hostapd', 'all_sta'], capture_output=True, text=True)
-        print(f"[DEBUG] hostapd_cli return code: {hostapd_cli.returncode}")
-        print(f"[DEBUG] hostapd_cli output: {hostapd_cli.stdout}")
+        result = []
         
-        # Only track currently connected clients from hostapd
-        connected_clients = {}
-        current_mac = None
-        
-        if hostapd_cli.returncode == 0:
-            for line in hostapd_cli.stdout.split('\n'):
-                line = line.strip()
-                if re.match(r'^[0-9A-Fa-f:]{17}$', line):
-                    current_mac = line
-                    print(f"[DEBUG] Found connected MAC address: {current_mac}")
-                    connected_clients[current_mac] = {
-                        'mac_address': current_mac,
-                        'signal_strength': None,
-                        'connected_time': None,
-                        'rx_bytes': None,
-                        'tx_bytes': None
-                    }
-                elif current_mac and '=' in line:
-                    key, value = line.split('=', 1)
-                    if key in ['connected_time', 'rx_bytes', 'tx_bytes', 'signal']:
-                        print(f"[DEBUG] Found {key}={value} for {current_mac}")
-                    if key == 'connected_time':
-                        connected_clients[current_mac]['connected_time'] = int(value)
-                    elif key == 'rx_bytes':
-                        connected_clients[current_mac]['rx_bytes'] = int(value)
-                    elif key == 'tx_bytes':
-                        connected_clients[current_mac]['tx_bytes'] = int(value)
-                    elif key == 'signal':
-                        connected_clients[current_mac]['signal_strength'] = int(value)
-
-        # Only proceed with clients that are currently connected according to hostapd
-        if not connected_clients:
-            print("[DEBUG] No connected clients found")
-            return jsonify([])
-
-        print(f"[DEBUG] Found {len(connected_clients)} connected clients")
-
-        # Add DHCP info only for currently connected clients
+        # Get DHCP leases for connected clients
         if os.path.exists('/var/lib/misc/dnsmasq.leases'):
             with open('/var/lib/misc/dnsmasq.leases', 'r') as f:
                 leases_content = f.read()
-                print(f"[DEBUG] Reading DHCP leases for connected clients")
+                print(f"[DEBUG] Reading DHCP leases")
                 for line in leases_content.split('\n'):
                     parts = line.strip().split()
                     if len(parts) >= 4:
                         timestamp, mac, ip, hostname = parts[0:4]
-                        # Only add DHCP info for clients that are currently connected
-                        if mac in connected_clients:
-                            print(f"[DEBUG] Found DHCP lease for connected client: {mac}")
-                            connected_clients[mac].update({
+                        # Only include clients that are marked as connected
+                        if mac in connected_clients and connected_clients[mac]['connected']:
+                            print(f"[DEBUG] Found lease for connected client: {mac}")
+                            client_info = {
+                                'mac_address': mac,
                                 'ip_address': ip,
                                 'hostname': hostname,
-                                'lease_timestamp': datetime.fromtimestamp(int(timestamp)).isoformat()
-                            })
-
-        # Format output for connected clients
-        result = []
-        for client in connected_clients.values():
-            if client['connected_time'] is not None:
-                minutes = client['connected_time'] // 60
-                hours = minutes // 60
-                minutes = minutes % 60
-                client['connection_duration'] = f"{hours}h {minutes}m"
-            else:
-                client['connection_duration'] = "Just connected"
-            
-            if client['rx_bytes'] and client['tx_bytes']:
-                client['rx_mb'] = round(client['rx_bytes'] / (1024 * 1024), 2)
-                client['tx_mb'] = round(client['tx_bytes'] / (1024 * 1024), 2)
-            else:
-                client['rx_mb'] = 0
-                client['tx_mb'] = 0
-            
-            if client['signal_strength']:
-                client['signal_dbm'] = f"{client['signal_strength']} dBm"
-            else:
-                client['signal_dbm'] = "N/A"
-            
-            # Clean up internal fields
-            for field in ['connected_time', 'rx_bytes', 'tx_bytes', 'signal_strength']:
-                client.pop(field, None)
-            
-            result.append(client)
+                                'lease_timestamp': datetime.fromtimestamp(int(timestamp)).isoformat(),
+                                'connection_duration': connected_clients[mac]['duration'],
+                                'signal_dbm': connected_clients[mac].get('signal_dbm', 'N/A'),
+                                'rx_mb': connected_clients[mac].get('rx_mb', 0),
+                                'tx_mb': connected_clients[mac].get('tx_mb', 0)
+                            }
+                            result.append(client_info)
 
         print(f"[DEBUG] Returning {len(result)} connected clients")
         return jsonify(result)
@@ -173,6 +113,47 @@ def connections_api():
         import traceback
         print(f"[DEBUG] Traceback: {traceback.format_exc()}")
         return jsonify([])
+
+# Event handlers for hostapd events
+def handle_client_connect(mac):
+    print(f"[DEBUG] Client connected: {mac}")
+    connected_clients[mac] = {
+        'connected': True,
+        'connect_time': time.time(),
+        'duration': 'Just connected',
+        'signal_dbm': 'N/A',
+        'rx_mb': 0,
+        'tx_mb': 0
+    }
+
+def handle_client_disconnect(mac):
+    print(f"[DEBUG] Client disconnected: {mac}")
+    if mac in connected_clients:
+        connected_clients[mac]['connected'] = False
+
+def update_client_durations():
+    current_time = time.time()
+    for mac, client in connected_clients.items():
+        if client['connected']:
+            duration = int(current_time - client['connect_time'])
+            hours = duration // 3600
+            minutes = (duration % 3600) // 60
+            client['duration'] = f"{hours}h {minutes}m"
+
+# Update durations periodically
+@app.before_request
+def before_request():
+    update_client_durations()
+
+# Event handler route for hostapd events
+@app.route('/api/events', methods=['POST'])
+def handle_event():
+    event = request.json
+    if event['type'] == 'connect':
+        handle_client_connect(event['mac'])
+    elif event['type'] == 'disconnect':
+        handle_client_disconnect(event['mac'])
+    return jsonify({'status': 'ok'})
 
 # Serve React static files
 @app.route('/dashboard/static/js/<path:filename>')

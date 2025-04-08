@@ -49,6 +49,9 @@ cat hostapd.conf
 sudo hostapd hostapd.conf &
 sleep 2
 
+# Start monitoring hostapd events
+monitor_hostapd_events
+
 # ─── 4. Start dnsmasq ─────────────────────────────────────────────
 echo "[*] Starting dnsmasq..."
 echo "[DEBUG] Running dnsmasq with config:"
@@ -150,5 +153,18 @@ while true; do
         echo "[↻] Menu refreshed. Press [1] to quit or [2] to open dashboard."
     fi
 done
+
+monitor_hostapd_events() {
+    # Monitor hostapd events and send them to Flask server
+    tail -f /var/run/hostapd/wlan0 | while read line; do
+        if echo "$line" | grep -q "AP-STA-CONNECTED"; then
+            mac=$(echo "$line" | grep -o "[0-9a-f:]\{17\}")
+            curl -X POST -H "Content-Type: application/json" -d "{\"type\":\"connect\",\"mac\":\"$mac\"}" http://localhost:443/api/events
+        elif echo "$line" | grep -q "AP-STA-DISCONNECTED"; then
+            mac=$(echo "$line" | grep -o "[0-9a-f:]\{17\}")
+            curl -X POST -H "Content-Type: application/json" -d "{\"type\":\"disconnect\",\"mac\":\"$mac\"}" http://localhost:443/api/events
+        fi
+    done &
+}
 
 
