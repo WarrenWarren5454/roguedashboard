@@ -69,19 +69,35 @@ def creds_api():
             print(f"Error reading credentials file: {e}")
     return jsonify(entries)
 
-# Serve static files from the React build directory
-@app.route('/static/<path:path>')
-def serve_static(path):
-    try:
-        if os.path.exists('frontend/build/static'):
-            return send_from_directory('frontend/build/static', path)
-        return '', 404
-    except Exception as e:
-        print(f"Error serving static file: {e}")
-        return str(e), 500
+# Serve React static files
+@app.route('/static/js/<path:filename>')
+def serve_js(filename):
+    return send_from_directory('frontend/build/static/js', filename)
+
+@app.route('/static/css/<path:filename>')
+def serve_css(filename):
+    return send_from_directory('frontend/build/static/css', filename)
+
+@app.route('/static/media/<path:filename>')
+def serve_media(filename):
+    return send_from_directory('frontend/build/static/media', filename)
+
+# Serve other React assets
+@app.route('/manifest.json')
+def serve_manifest():
+    return send_from_directory('frontend/build', 'manifest.json')
+
+@app.route('/favicon.ico')
+def serve_favicon():
+    return send_from_directory('frontend/build', 'favicon.ico')
+
+@app.route('/logo192.png')
+def serve_logo():
+    return send_from_directory('frontend/build', 'logo192.png')
 
 if __name__ == '__main__':
     print(f"Starting Flask server on port 443...")
     print(f"Templates directory: {os.path.abspath('templates')}")
     print(f"Static directory: {os.path.abspath('static')}")
+    print(f"React build directory: {os.path.abspath('frontend/build')}")
     app.run(host='0.0.0.0', port=443, ssl_context=('cert.crt', 'cert.key'), debug=True)
