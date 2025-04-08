@@ -90,22 +90,18 @@ def connections_api():
                     parts = line.strip().split()
                     if len(parts) >= 4:
                         timestamp, mac, ip, hostname = parts[0:4]
-                        # Only include clients that are marked as connected
-                        if mac in connected_clients and connected_clients[mac]['connected']:
-                            print(f"[DEBUG] Found lease for connected client: {mac}")
-                            client_info = {
-                                'mac_address': mac,
-                                'ip_address': ip,
-                                'hostname': hostname,
-                                'lease_timestamp': datetime.fromtimestamp(int(timestamp)).isoformat(),
-                                'connection_duration': connected_clients[mac]['duration'],
-                                'signal_dbm': connected_clients[mac].get('signal_dbm', 'N/A'),
-                                'rx_mb': connected_clients[mac].get('rx_mb', 0),
-                                'tx_mb': connected_clients[mac].get('tx_mb', 0)
-                            }
-                            result.append(client_info)
+                        client_info = {
+                            'mac': mac,
+                            'ip': ip,
+                            'hostname': hostname,
+                            'connected_since': int(timestamp),
+                            'rx_mb': connected_clients.get(mac, {}).get('rx_mb', 0),
+                            'tx_mb': connected_clients.get(mac, {}).get('tx_mb', 0),
+                            'status': 'Connected' if mac in connected_clients and connected_clients[mac]['connected'] else 'Disconnected'
+                        }
+                        result.append(client_info)
 
-        print(f"[DEBUG] Returning {len(result)} connected clients")
+        print(f"[DEBUG] Returning {len(result)} clients")
         return jsonify(result)
     except Exception as e:
         print(f"[DEBUG] Error in connections_api: {str(e)}")

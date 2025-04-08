@@ -46,6 +46,25 @@ ip addr show $IFACE
 echo "[*] Starting hostapd..."
 echo "[DEBUG] Running hostapd with config:"
 cat hostapd.conf
+
+monitor_hostapd_events() {
+    # Monitor hostapd events and send them to Flask server
+    echo "[DEBUG] Starting hostapd event monitoring..."
+    sudo hostapd_cli -i $IFACE -a /bin/bash -c '
+        while read line; do
+            if echo "$line" | grep -q "AP-STA-CONNECTED"; then
+                mac=$(echo "$line" | grep -o "[0-9a-f:]\{17\}")
+                curl -X POST -H "Content-Type: application/json" -d "{\"type\":\"connect\",\"mac\":\"$mac\"}" http://localhost:443/api/events
+                echo "[DEBUG] Sent connect event for $mac"
+            elif echo "$line" | grep -q "AP-STA-DISCONNECTED"; then
+                mac=$(echo "$line" | grep -o "[0-9a-f:]\{17\}")
+                curl -X POST -H "Content-Type: application/json" -d "{\"type\":\"disconnect\",\"mac\":\"$mac\"}" http://localhost:443/api/events
+                echo "[DEBUG] Sent disconnect event for $mac"
+            fi
+        done
+    ' &
+}
+
 sudo hostapd hostapd.conf &
 sleep 2
 
@@ -153,18 +172,5 @@ while true; do
         echo "[↻] Menu refreshed. Press [1] to quit or [2] to open dashboard."
     fi
 done
-
-monitor_hostapd_events() {
-    # Monitor hostapd events and send them to Flask server
-    tail -f /var/run/hostapd/wlan0 | while read line; do
-        if echo "$line" | grep -q "AP-STA-CONNECTED"; then
-            mac=$(echo "$line" | grep -o "[0-9a-f:]\{17\}")
-            curl -X POST -H "Content-Type: application/json" -d "{\"type\":\"connect\",\"mac\":\"$mac\"}" http://localhost:443/api/events
-        elif echo "$line" | grep -q "AP-STA-DISCONNECTED"; then
-            mac=$(echo "$line" | grep -o "[0-9a-f:]\{17\}")
-            curl -X POST -H "Content-Type: application/json" -d "{\"type\":\"disconnect\",\"mac\":\"$mac\"}" http://localhost:443/api/events
-        fi
-    done &
-}
 
 
