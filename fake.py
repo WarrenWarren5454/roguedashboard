@@ -77,7 +77,7 @@ def connections_api():
         print("[DEBUG] Starting connections_api()")
         # Get connected clients from hostapd with detailed information
         print("[DEBUG] Running hostapd_cli command...")
-        hostapd_cli = subprocess.run(['hostapd_cli', '-i', 'wlan0', 'all_sta'], capture_output=True, text=True)
+        hostapd_cli = subprocess.run(['hostapd_cli', '-i', 'wlan0', '-p', '/var/run/hostapd', 'all_sta'], capture_output=True, text=True)
         print(f"[DEBUG] hostapd_cli return code: {hostapd_cli.returncode}")
         print(f"[DEBUG] hostapd_cli output: {hostapd_cli.stdout}")
         
@@ -95,7 +95,8 @@ def connections_api():
                         'signal_strength': None,
                         'connected_time': None,
                         'rx_bytes': None,
-                        'tx_bytes': None
+                        'tx_bytes': None,
+                        'is_connected': True
                     }
                 elif current_mac and '=' in line:
                     key, value = line.split('=', 1)
@@ -124,14 +125,14 @@ def connections_api():
                     if len(parts) >= 4:
                         timestamp, mac, ip, hostname = parts[0:4]
                         print(f"[DEBUG] Found lease: timestamp={timestamp}, mac={mac}, ip={ip}, hostname={hostname}")
-                        # Include clients even if they're not in hostapd's list (they might have disconnected)
                         if mac not in connected_clients:
                             connected_clients[mac] = {
                                 'mac_address': mac,
                                 'signal_strength': None,
                                 'connected_time': None,
                                 'rx_bytes': None,
-                                'tx_bytes': None
+                                'tx_bytes': None,
+                                'is_connected': False
                             }
                         connected_clients[mac].update({
                             'ip_address': ip,
@@ -142,9 +143,8 @@ def connections_api():
         # Convert connected_time to human-readable format and calculate transfer rates
         result = []
         for client in connected_clients.values():
-            # Include all clients that have an IP address, even if they're not currently connected
             if 'ip_address' in client:
-                if client['connected_time']:
+                if client['is_connected'] and client['connected_time']:
                     minutes = client['connected_time'] // 60
                     hours = minutes // 60
                     minutes = minutes % 60
@@ -165,7 +165,7 @@ def connections_api():
                     client['signal_dbm'] = "N/A"
                 
                 # Clean up internal fields
-                for field in ['connected_time', 'rx_bytes', 'tx_bytes', 'signal_strength']:
+                for field in ['connected_time', 'rx_bytes', 'tx_bytes', 'signal_strength', 'is_connected']:
                     client.pop(field, None)
                 
                 result.append(client)
