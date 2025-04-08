@@ -15,7 +15,11 @@ interface Connection {
   mac_address: string;
   ip_address: string;
   hostname: string;
-  connected_since: string;
+  lease_timestamp: string;
+  connection_duration: string;
+  signal_dbm: string;
+  rx_mb: number;
+  tx_mb: number;
 }
 
 export const CurrentConnections: React.FC = () => {
@@ -49,7 +53,11 @@ export const CurrentConnections: React.FC = () => {
               <TableCell sx={{ color: 'white' }}>MAC Address</TableCell>
               <TableCell sx={{ color: 'white' }}>IP Address</TableCell>
               <TableCell sx={{ color: 'white' }}>Hostname</TableCell>
-              <TableCell sx={{ color: 'white' }}>Connected Since</TableCell>
+              <TableCell sx={{ color: 'white' }}>Connected For</TableCell>
+              <TableCell sx={{ color: 'white' }}>Signal</TableCell>
+              <TableCell sx={{ color: 'white' }}>Data Received</TableCell>
+              <TableCell sx={{ color: 'white' }}>Data Sent</TableCell>
+              <TableCell sx={{ color: 'white' }}>Last DHCP Lease</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -58,7 +66,11 @@ export const CurrentConnections: React.FC = () => {
                 <TableCell>{conn.mac_address}</TableCell>
                 <TableCell>{conn.ip_address}</TableCell>
                 <TableCell>{conn.hostname}</TableCell>
-                <TableCell>{new Date(conn.connected_since).toLocaleString()}</TableCell>
+                <TableCell>{conn.connection_duration || 'N/A'}</TableCell>
+                <TableCell>{conn.signal_dbm || 'N/A'}</TableCell>
+                <TableCell>{conn.rx_mb ? `${conn.rx_mb} MB` : 'N/A'}</TableCell>
+                <TableCell>{conn.tx_mb ? `${conn.tx_mb} MB` : 'N/A'}</TableCell>
+                <TableCell>{new Date(conn.lease_timestamp).toLocaleString()}</TableCell>
               </TableRow>
             ))}
           </TableBody>

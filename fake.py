@@ -74,29 +74,72 @@ def creds_api():
 @app.route('/api/connections')
 def connections_api():
     try:
-        # Get connected clients from hostapd
+        # Get connected clients from hostapd with detailed information
         hostapd_cli = subprocess.run(['hostapd_cli', 'all_sta'], capture_output=True, text=True)
-        connected_macs = []
+        connected_clients = {}
+        current_mac = None
+        
         if hostapd_cli.returncode == 0:
-            connected_macs = [line.strip() for line in hostapd_cli.stdout.split('\n') if re.match(r'^[0-9A-Fa-f:]{17}$', line.strip())]
+            for line in hostapd_cli.stdout.split('\n'):
+                line = line.strip()
+                if re.match(r'^[0-9A-Fa-f:]{17}$', line):
+                    current_mac = line
+                    connected_clients[current_mac] = {
+                        'mac_address': current_mac,
+                        'signal_strength': None,
+                        'connected_time': None,
+                        'rx_bytes': None,
+                        'tx_bytes': None
+                    }
+                elif current_mac and '=' in line:
+                    key, value = line.split('=', 1)
+                    if key == 'connected_time':
+                        connected_clients[current_mac]['connected_time'] = int(value)
+                    elif key == 'rx_bytes':
+                        connected_clients[current_mac]['rx_bytes'] = int(value)
+                    elif key == 'tx_bytes':
+                        connected_clients[current_mac]['tx_bytes'] = int(value)
+                    elif key == 'signal':
+                        connected_clients[current_mac]['signal_strength'] = int(value)
 
         # Get DHCP leases from dnsmasq.leases
-        leases = []
         if os.path.exists('/var/lib/misc/dnsmasq.leases'):
             with open('/var/lib/misc/dnsmasq.leases', 'r') as f:
                 for line in f:
                     parts = line.strip().split()
                     if len(parts) >= 4:
                         timestamp, mac, ip, hostname = parts[0:4]
-                        if mac in connected_macs:  # Only include currently connected clients
-                            leases.append({
-                                'mac_address': mac,
+                        if mac in connected_clients:
+                            connected_clients[mac].update({
                                 'ip_address': ip,
                                 'hostname': hostname,
-                                'connected_since': datetime.fromtimestamp(int(timestamp)).isoformat()
+                                'lease_timestamp': datetime.fromtimestamp(int(timestamp)).isoformat()
                             })
 
-        return jsonify(leases)
+        # Convert connected_time to human-readable format and calculate transfer rates
+        result = []
+        for client in connected_clients.values():
+            if 'ip_address' in client:  # Only include clients with IP addresses
+                if client['connected_time']:
+                    minutes = client['connected_time'] // 60
+                    hours = minutes // 60
+                    minutes = minutes % 60
+                    client['connection_duration'] = f"{hours}h {minutes}m"
+                
+                if client['rx_bytes'] and client['tx_bytes']:
+                    client['rx_mb'] = round(client['rx_bytes'] / (1024 * 1024), 2)
+                    client['tx_mb'] = round(client['tx_bytes'] / (1024 * 1024), 2)
+                
+                if client['signal_strength']:
+                    client['signal_dbm'] = f"{client['signal_strength']} dBm"
+                
+                # Clean up internal fields
+                for field in ['connected_time', 'rx_bytes', 'tx_bytes', 'signal_strength']:
+                    client.pop(field, None)
+                
+                result.append(client)
+
+        return jsonify(result)
     except Exception as e:
         print(f"Error getting connections: {e}")
         return jsonify([])
