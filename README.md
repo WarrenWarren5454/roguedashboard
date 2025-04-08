@@ -1,17 +1,44 @@
 # Rogue Dashboard
-Rogue AP Web Server + Dashboard
 
-This project was to help me learn more about iptables, dnsmasq, hostapd, Flask web servers, and Rogue AP attacks in general. It mimics the University of Houston login page.
-Once it is running, users will connect to the Wi-Fi and be prompted with a captive web portal to enter in their credentials. Their credentials will POST to a text file once they "log in"
-As of now, they will not be able to actually use the internet.
+A Flask web server with a React dashboard for monitoring captured credentials.
 
-Requirements:
-- Wi-Fi adapter that supports AP mode (I used ALFA AWUS036ACM)
-- Python 3
-- Kali Linux (or any Linux distro that supports iptables, dnsmasq, hostapd, etc)
+## Prerequisites
 
-Optional:
-- Server to exfiltrate credentials to (I used Linode) - otherwise it just goes to the machine running the Flask server
+1. Python 3.x
+2. Node.js and npm
+3. A Wi-Fi adapter that supports AP mode (e.g., ALFA AWUS036ACM)
+4. Kali Linux or any Linux distro with iptables, dnsmasq, and hostapd support
+
+## Setup Steps
+
+1. Install Python dependencies:
+```bash
+python -m pip install flask flask-cors requests
+```
+
+2. Install Node.js dependencies:
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+3. Start the Rogue AP:
+```bash
+sudo ./start_rogue_ap.sh
+```
+
+4. Access the dashboard:
+- Development: http://localhost:3000
+- Production: https://10.0.0.1/dashboard
+
+## Features
+
+- Captive portal that mimics UH login
+- Real-time credential monitoring
+- Modern React dashboard
+- Secure HTTPS connection
+- Automatic credential storage
 
 ## Project Structure
 
@@ -19,10 +46,18 @@ Optional:
 .
 ├── start_rogue_ap.sh       # Main setup script
 ├── stop_rogue_ap.sh        # Clean shutdown
-├── fake.py                 # Flask HTTPS server with portal + dashboard
-├── http_redirect.py        # Captive portal redirect (port 80)
+├── fake.py                 # Flask HTTPS server
+├── http_redirect.py        # Captive portal redirect
 ├── hostapd.conf            # AP config
 ├── dnsmasq.conf            # DNS/DHCP config
-├── creds/credentials.txt   # Captured credentials
-├── templates/              # Flask HTML templates
-└── static/                 # JS, CSS, and image assets
+├── cert.crt                # SSL certificate
+├── cert.key                # SSL private key
+├── creds/                  # Captured credentials
+├── frontend/              # React dashboard
+└── templates/             # Flask HTML templates
+
+```
+
+## Security Note
+
+This project is for educational purposes only. Ensure you have proper authorization before using this tool.

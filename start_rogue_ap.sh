@@ -10,23 +10,43 @@ KEY_FILE="cert.key"
 echo "[*] Stopping conflicting services..."
 sudo pkill hostapd
 sudo pkill dnsmasq
+sudo pkill -f fake.py
+sudo pkill -f http_redirect.py
 sudo iptables -t nat -F
 sudo iptables -F FORWARD
 
 # ─── 2. Bring up interface ────────────────────────────────────────
 echo "[*] Configuring $IFACE..."
+echo "[DEBUG] Available interfaces:"
+ip link show
+
+echo "[DEBUG] Checking if $IFACE exists..."
+if ! ip link show $IFACE >/dev/null 2>&1; then
+    echo "[ERROR] Interface $IFACE not found. Available interfaces are:"
+    ip link show | grep -o '^[0-9]: .*' | cut -d' ' -f2
+    echo "Please edit IFACE variable in the script to match your wireless interface"
+    exit 1
+fi
+
 sudo ip link set $IFACE down
 sudo iw dev $IFACE set type __ap
 sudo ip addr add $GATEWAY/24 dev $IFACE
 sudo ip link set $IFACE up
 
+echo "[DEBUG] Interface configuration:"
+ip addr show $IFACE
+
 # ─── 3. Start hostapd ─────────────────────────────────────────────
 echo "[*] Starting hostapd..."
-sudo hostapd hostapd.conf > /dev/null 2>&1 &
+echo "[DEBUG] Running hostapd with config:"
+cat hostapd.conf
+sudo hostapd hostapd.conf &
 sleep 2
 
 # ─── 4. Start dnsmasq ─────────────────────────────────────────────
 echo "[*] Starting dnsmasq..."
+echo "[DEBUG] Running dnsmasq with config:"
+cat dnsmasq.conf
 sudo dnsmasq -C dnsmasq.conf
 
 # ─── 5. Enable IP forwarding ──────────────────────────────────────
