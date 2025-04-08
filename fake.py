@@ -5,7 +5,7 @@ import requests
 import os
 import ast
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static')  # Set the static folder explicitly
 CORS(app)  # Enable CORS for development
 
 # Ensure creds directory exists
@@ -70,16 +70,13 @@ def creds_api():
     return jsonify(entries)
 
 # Serve React static files
-@app.route('/static/js/<path:filename>')
-def serve_js(filename):
-    return send_from_directory('frontend/build/static/js', filename)
-
-@app.route('/static/css/<path:filename>')
-def serve_css(filename):
-    return send_from_directory('frontend/build/static/css', filename)
-
+@app.route('/static/js/main.<path:filename>')
+@app.route('/static/css/main.<path:filename>')
 @app.route('/static/media/<path:filename>')
-def serve_media(filename):
+def serve_react_static(filename):
+    if 'main.' in request.path:
+        folder = 'js' if '/js/' in request.path else 'css'
+        return send_from_directory(f'frontend/build/static/{folder}', f'main.{filename}')
     return send_from_directory('frontend/build/static/media', filename)
 
 # Serve other React assets
