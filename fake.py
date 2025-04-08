@@ -74,8 +74,13 @@ def creds_api():
 @app.route('/api/connections')
 def connections_api():
     try:
+        print("[DEBUG] Starting connections_api()")
         # Get connected clients from hostapd with detailed information
+        print("[DEBUG] Running hostapd_cli command...")
         hostapd_cli = subprocess.run(['hostapd_cli', 'all_sta'], capture_output=True, text=True)
+        print(f"[DEBUG] hostapd_cli return code: {hostapd_cli.returncode}")
+        print(f"[DEBUG] hostapd_cli output: {hostapd_cli.stdout}")
+        
         connected_clients = {}
         current_mac = None
         
@@ -84,6 +89,7 @@ def connections_api():
                 line = line.strip()
                 if re.match(r'^[0-9A-Fa-f:]{17}$', line):
                     current_mac = line
+                    print(f"[DEBUG] Found MAC address: {current_mac}")
                     connected_clients[current_mac] = {
                         'mac_address': current_mac,
                         'signal_strength': None,
@@ -93,6 +99,8 @@ def connections_api():
                     }
                 elif current_mac and '=' in line:
                     key, value = line.split('=', 1)
+                    if key in ['connected_time', 'rx_bytes', 'tx_bytes', 'signal']:
+                        print(f"[DEBUG] Found {key}={value} for {current_mac}")
                     if key == 'connected_time':
                         connected_clients[current_mac]['connected_time'] = int(value)
                     elif key == 'rx_bytes':
@@ -102,14 +110,22 @@ def connections_api():
                     elif key == 'signal':
                         connected_clients[current_mac]['signal_strength'] = int(value)
 
+        print(f"[DEBUG] Connected clients after hostapd: {connected_clients}")
+
         # Get DHCP leases from dnsmasq.leases
+        print("[DEBUG] Checking dnsmasq.leases file...")
         if os.path.exists('/var/lib/misc/dnsmasq.leases'):
+            print("[DEBUG] Found dnsmasq.leases file")
             with open('/var/lib/misc/dnsmasq.leases', 'r') as f:
-                for line in f:
+                leases_content = f.read()
+                print(f"[DEBUG] dnsmasq.leases content: {leases_content}")
+                for line in leases_content.split('\n'):
                     parts = line.strip().split()
                     if len(parts) >= 4:
                         timestamp, mac, ip, hostname = parts[0:4]
+                        print(f"[DEBUG] Found lease: timestamp={timestamp}, mac={mac}, ip={ip}, hostname={hostname}")
                         if mac in connected_clients:
+                            print(f"[DEBUG] Updating client info for {mac}")
                             connected_clients[mac].update({
                                 'ip_address': ip,
                                 'hostname': hostname,
@@ -139,9 +155,13 @@ def connections_api():
                 
                 result.append(client)
 
+        print(f"[DEBUG] Final result: {result}")
         return jsonify(result)
     except Exception as e:
-        print(f"Error getting connections: {e}")
+        print(f"[DEBUG] Error in connections_api: {str(e)}")
+        print(f"[DEBUG] Error type: {type(e)}")
+        import traceback
+        print(f"[DEBUG] Traceback: {traceback.format_exc()}")
         return jsonify([])
 
 # Serve React static files
