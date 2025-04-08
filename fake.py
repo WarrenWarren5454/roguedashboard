@@ -102,13 +102,13 @@ def connections_api():
         return jsonify([])
 
 # Serve React static files
-@app.route('/static/js/main.<path:filename>')
-@app.route('/static/css/main.<path:filename>')
+@app.route('/static/js/<path:filename>')
+@app.route('/static/css/<path:filename>')
 @app.route('/static/media/<path:filename>')
 def serve_react_static(filename):
-    if 'main.' in request.path:
+    if filename.startswith('main.'):
         folder = 'js' if '/js/' in request.path else 'css'
-        return send_from_directory(f'frontend/build/static/{folder}', f'main.{filename}')
+        return send_from_directory(f'frontend/build/static/{folder}', filename)
     return send_from_directory('frontend/build/static/media', filename)
 
 # Serve other React assets
