@@ -102,9 +102,6 @@ def connections_api():
         return jsonify([])
 
 # Serve React static files
-@app.route('/static/js/<path:filename>')
-@app.route('/static/css/<path:filename>')
-@app.route('/static/media/<path:filename>')
 @app.route('/dashboard/static/js/<path:filename>')
 @app.route('/dashboard/static/css/<path:filename>')
 @app.route('/dashboard/static/media/<path:filename>')
@@ -114,18 +111,20 @@ def serve_react_static(filename):
         return send_from_directory(f'frontend/build/static/{folder}', filename)
     return send_from_directory('frontend/build/static/media', filename)
 
+# Serve captive portal static files
+@app.route('/static/<path:filename>')
+def serve_portal_static(filename):
+    return send_from_directory('static', filename)
+
 # Serve other React assets
-@app.route('/manifest.json')
 @app.route('/dashboard/manifest.json')
 def serve_manifest():
     return send_from_directory('frontend/build', 'manifest.json')
 
-@app.route('/favicon.ico')
 @app.route('/dashboard/favicon.ico')
 def serve_favicon():
     return send_from_directory('frontend/build', 'favicon.ico')
 
-@app.route('/logo192.png')
 @app.route('/dashboard/logo192.png')
 def serve_logo():
     return send_from_directory('frontend/build', 'logo192.png')
