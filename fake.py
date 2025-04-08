@@ -4,6 +4,8 @@ from datetime import datetime
 import requests
 import os
 import ast
+import subprocess
+import re
 
 app = Flask(__name__, static_folder='static')  # Set the static folder explicitly
 CORS(app)  # Enable CORS for development
@@ -68,6 +70,36 @@ def creds_api():
         except Exception as e:
             print(f"Error reading credentials file: {e}")
     return jsonify(entries)
+
+@app.route('/api/connections')
+def connections_api():
+    try:
+        # Get connected clients from hostapd
+        hostapd_cli = subprocess.run(['hostapd_cli', 'all_sta'], capture_output=True, text=True)
+        connected_macs = []
+        if hostapd_cli.returncode == 0:
+            connected_macs = [line.strip() for line in hostapd_cli.stdout.split('\n') if re.match(r'^[0-9A-Fa-f:]{17}$', line.strip())]
+
+        # Get DHCP leases from dnsmasq.leases
+        leases = []
+        if os.path.exists('/var/lib/misc/dnsmasq.leases'):
+            with open('/var/lib/misc/dnsmasq.leases', 'r') as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) >= 4:
+                        timestamp, mac, ip, hostname = parts[0:4]
+                        if mac in connected_macs:  # Only include currently connected clients
+                            leases.append({
+                                'mac_address': mac,
+                                'ip_address': ip,
+                                'hostname': hostname,
+                                'connected_since': datetime.fromtimestamp(int(timestamp)).isoformat()
+                            })
+
+        return jsonify(leases)
+    except Exception as e:
+        print(f"Error getting connections: {e}")
+        return jsonify([])
 
 # Serve React static files
 @app.route('/static/js/main.<path:filename>')
