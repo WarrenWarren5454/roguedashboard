@@ -82,7 +82,20 @@ def connections_api():
         result = []
         current_time = int(time.time())
         
-        # Get DHCP leases for connected clients
+        # Get current connected stations from hostapd
+        try:
+            output = subprocess.check_output(['sudo', 'hostapd_cli', '-i', 'wlan0', 'all_sta'], stderr=subprocess.PIPE)
+            connected_macs = set()
+            for line in output.decode().strip().split('\n'):
+                if re.match('^([0-9A-Fa-f:]{17})', line):
+                    mac = line.strip()
+                    connected_macs.add(mac)
+                    print(f"[DEBUG] Found connected station: {mac}")
+        except subprocess.CalledProcessError as e:
+            print(f"[DEBUG] Error getting stations from hostapd: {e}")
+            connected_macs = set()
+        
+        # Get DHCP leases
         if os.path.exists('/var/lib/misc/dnsmasq.leases'):
             with open('/var/lib/misc/dnsmasq.leases', 'r') as f:
                 leases_content = f.read()
@@ -96,8 +109,9 @@ def connections_api():
                             # Skip entries with invalid timestamps (before 2020)
                             if lease_time < 1577836800:  # Jan 1, 2020
                                 continue
-                                
-                            is_connected = mac in connected_clients and connected_clients[mac]['connected']
+                            
+                            # Check if client is currently connected
+                            is_connected = mac in connected_macs
                             
                             # Only show entries from the last 24 hours
                             if current_time - lease_time <= 86400:
@@ -165,6 +179,14 @@ def handle_event():
         if event['type'] == 'connect':
             handle_client_connect(event['mac'])
             print(f"[DEBUG] Client connected: {event['mac']}")
+            
+            # Get station info
+            try:
+                output = subprocess.check_output(['sudo', 'hostapd_cli', '-i', 'wlan0', 'sta', event['mac']], stderr=subprocess.PIPE)
+                print(f"[DEBUG] Station info: {output.decode()}")
+            except subprocess.CalledProcessError as e:
+                print(f"[DEBUG] Error getting station info: {e}")
+                
         elif event['type'] == 'disconnect':
             handle_client_disconnect(event['mac'])
             print(f"[DEBUG] Client disconnected: {event['mac']}")

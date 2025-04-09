@@ -47,23 +47,23 @@ echo "[*] Starting hostapd..."
 echo "[DEBUG] Running hostapd with config:"
 cat hostapd.conf
 
-# Create control interface directory
+# Create control interface directory with proper permissions
 sudo mkdir -p /var/run/hostapd
-sudo chmod 777 /var/run/hostapd
+sudo chown root:root /var/run/hostapd
+sudo chmod 755 /var/run/hostapd
 
-# Start hostapd with control interface
-sudo hostapd -B -P /var/run/hostapd/pid -i $IFACE hostapd.conf
-HOSTAPD_PID=$(cat /var/run/hostapd/pid)
-echo "[DEBUG] Hostapd PID: $HOSTAPD_PID"
+# Start hostapd
+sudo hostapd hostapd.conf -B
+sleep 2
 
-# Wait for hostapd to fully start
-echo "[DEBUG] Waiting for hostapd to initialize..."
-for i in {1..10}; do
-    if sudo hostapd_cli -i $IFACE status >/dev/null 2>&1; then
-        echo "[DEBUG] Hostapd is ready"
+# Wait for hostapd to fully start and create control interface
+echo "[DEBUG] Waiting for hostapd control interface..."
+for i in {1..30}; do
+    if [ -e "/var/run/hostapd/wlan0" ]; then
+        echo "[DEBUG] Hostapd control interface is ready"
         break
     fi
-    echo "[DEBUG] Waiting for hostapd... attempt $i/10"
+    echo "[DEBUG] Waiting for hostapd control interface... attempt $i/30"
     sleep 1
 done
 
@@ -74,30 +74,36 @@ monitor_hostapd_events() {
     
     # Start monitoring loop
     while true; do
-        if ! sudo hostapd_cli -i $IFACE status >/dev/null 2>&1; then
-            echo "[DEBUG] Hostapd not responding, waiting..."
+        # Check if hostapd is running
+        if ! pgrep hostapd > /dev/null; then
+            echo "[ERROR] Hostapd process not found"
             sleep 5
             continue
         fi
         
         # Get list of connected stations
-        STATIONS=$(sudo hostapd_cli -i $IFACE all_sta 2>/dev/null)
-        if [ $? -eq 0 ]; then
-            echo "$STATIONS" | while read -r line; do
-                if [[ $line =~ ^([0-9A-Fa-f:]{17}) ]]; then
-                    mac="${BASH_REMATCH[1]}"
-                    # Send connect event for each active station
-                    curl -s -X POST -H "Content-Type: application/json" \
-                         -d "{\"type\":\"connect\",\"mac\":\"$mac\"}" \
-                         http://localhost:443/api/events
-                    echo "[DEBUG] Sent connect event for $mac"
+        STATIONS=$(sudo hostapd_cli -i wlan0 all_sta 2>/dev/null)
+        if [ $? -eq 0 ] && [ ! -z "$STATIONS" ]; then
+            echo "[DEBUG] Found stations: $STATIONS"
+            echo "$STATIONS" | while read -r mac; do
+                if [[ $mac =~ ^([0-9A-Fa-f:]{17}) ]]; then
+                    # Get station info
+                    INFO=$(sudo hostapd_cli -i wlan0 sta "$mac" 2>/dev/null)
+                    if [ $? -eq 0 ]; then
+                        echo "[DEBUG] Station info for $mac: $INFO"
+                        # Send connect event
+                        curl -s -X POST -H "Content-Type: application/json" \
+                             -d "{\"type\":\"connect\",\"mac\":\"$mac\"}" \
+                             http://localhost:443/api/events
+                        echo "[DEBUG] Sent connect event for $mac"
+                    fi
                 fi
             done
         else
-            echo "[DEBUG] Failed to get station list"
+            echo "[DEBUG] No stations connected"
         fi
         
-        sleep 5
+        sleep 2
     done &
 }
 
