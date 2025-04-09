@@ -14,19 +14,26 @@ app = Flask(__name__, static_folder='static')  # Set the static folder explicitl
 CORS(app)  # Enable CORS for development
 
 # Global variables for connection tracking
-HOSTAPD_LOG = 'hostapd.log'
-CONNECTIONS_FILE = 'connections.json'
+HOSTAPD_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs', 'hostapd.log')
+CONNECTIONS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs', 'connections.json')
 connections_lock = Lock()
 
 # Initialize or clear log files on startup
 def init_log_files():
+    # Create logs directory if it doesn't exist
+    log_dir = os.path.dirname(HOSTAPD_LOG)
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    
     # Clear hostapd log
     with open(HOSTAPD_LOG, 'w') as f:
         f.write('')
+    os.chmod(HOSTAPD_LOG, 0o666)  # Make writable by all users
     
     # Initialize connections file with empty list
     with open(CONNECTIONS_FILE, 'w') as f:
         json.dump([], f)
+    os.chmod(CONNECTIONS_FILE, 0o666)  # Make writable by all users
 
 # Initialize files on startup
 init_log_files()
