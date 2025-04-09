@@ -137,25 +137,44 @@ def update_connection_status(log_entry):
                                 hostname = parts[3]
                                 break
                 
-                # Add or update connection
-                existing = next((c for c in connections if c['mac'] == mac), None)
-                if existing:
-                    existing.update({
-                        'ip': ip,
-                        'hostname': hostname,
-                        'connected_since': current_time,
-                        'status': 'Connected'
-                    })
-                else:
-                    connections.append({
-                        'mac': mac,
-                        'ip': ip,
-                        'hostname': hostname,
-                        'connected_since': current_time,
-                        'rx_mb': 0,
-                        'tx_mb': 0,
-                        'status': 'Connected'
-                    })
+                # Get station info to get connected_time
+                try:
+                    info = subprocess.check_output(['sudo', 'hostapd_cli', '-i', 'wlan0', 'sta', mac], stderr=subprocess.PIPE).decode()
+                    connected_time = 0
+                    rx_bytes = 0
+                    tx_bytes = 0
+                    
+                    for line in info.split('\n'):
+                        if 'connected_time=' in line:
+                            connected_time = int(line.split('=')[1])
+                        elif 'rx_bytes=' in line:
+                            rx_bytes = int(line.split('=')[1])
+                        elif 'tx_bytes=' in line:
+                            tx_bytes = int(line.split('=')[1])
+                    
+                    # Add or update connection
+                    existing = next((c for c in connections if c['mac'] == mac), None)
+                    if existing:
+                        existing.update({
+                            'ip': ip,
+                            'hostname': hostname,
+                            'connected_since': current_time - connected_time,
+                            'rx_mb': round(rx_bytes / (1024 * 1024), 2),
+                            'tx_mb': round(tx_bytes / (1024 * 1024), 2),
+                            'status': 'Connected'
+                        })
+                    else:
+                        connections.append({
+                            'mac': mac,
+                            'ip': ip,
+                            'hostname': hostname,
+                            'connected_since': current_time - connected_time,
+                            'rx_mb': round(rx_bytes / (1024 * 1024), 2),
+                            'tx_mb': round(tx_bytes / (1024 * 1024), 2),
+                            'status': 'Connected'
+                        })
+                except subprocess.CalledProcessError:
+                    pass
             
             # Check for disconnection (DEAUTH)
             elif 'DEAUTH' in log_entry or 'timeout_next=DEAUTH' in log_entry:
