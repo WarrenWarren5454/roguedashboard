@@ -81,84 +81,91 @@ def connections_api():
         print("[DEBUG] Starting connections_api()")
         result = []
         current_time = int(time.time())
-        connected_macs = {}
         
         # Get current connected stations from hostapd
         try:
+            # First, get list of all stations
             output = subprocess.check_output(['sudo', 'hostapd_cli', '-i', 'wlan0', 'all_sta'], stderr=subprocess.PIPE)
             station_list = output.decode().strip().split('\n')
             print(f"[DEBUG] Raw station list: {station_list}")
             
+            # Process each station
             for line in station_list:
-                if re.match('^([0-9A-Fa-f:]{17})', line):
+                if re.match('^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', line):
                     mac = line.strip()
-                    # Get station info
-                    try:
-                        info = subprocess.check_output(['sudo', 'hostapd_cli', '-i', 'wlan0', 'sta', mac], stderr=subprocess.PIPE).decode()
-                        rx_bytes = 0
-                        tx_bytes = 0
-                        connected_time = 0
-                        for info_line in info.split('\n'):
-                            if 'rx_bytes=' in info_line:
-                                rx_bytes = int(info_line.split('=')[1])
-                            elif 'tx_bytes=' in info_line:
-                                tx_bytes = int(info_line.split('=')[1])
-                            elif 'connected_time=' in info_line:
-                                connected_time = int(info_line.split('=')[1])
-                        
-                        connected_macs[mac] = {
-                            'rx_mb': round(rx_bytes / (1024 * 1024), 2),
-                            'tx_mb': round(tx_bytes / (1024 * 1024), 2),
-                            'connected_since': current_time - connected_time
-                        }
-                        print(f"[DEBUG] Found connected station: {mac} (RX: {rx_bytes} bytes, TX: {tx_bytes} bytes, Connected: {connected_time}s)")
-                    except subprocess.CalledProcessError as e:
-                        print(f"[DEBUG] Error getting station info: {e}")
-                        continue
-        except subprocess.CalledProcessError as e:
-            print(f"[DEBUG] Error getting stations from hostapd: {e}")
-        
-        # Get DHCP leases
-        if os.path.exists('/var/lib/misc/dnsmasq.leases'):
-            with open('/var/lib/misc/dnsmasq.leases', 'r') as f:
-                leases_content = f.read()
-                print(f"[DEBUG] Reading DHCP leases")
-                for line in leases_content.split('\n'):
-                    parts = line.strip().split()
-                    if len(parts) >= 4:
-                        timestamp, mac, ip, hostname = parts[0:4]
-                        try:
-                            lease_time = int(timestamp)
-                            # Skip entries with invalid timestamps (before 2020)
-                            if lease_time < 1577836800:  # Jan 1, 2020
+                    print(f"[DEBUG] Processing station MAC: {mac}")
+                    
+                    # Get detailed station info
+                    station_info = subprocess.check_output(['sudo', 'hostapd_cli', '-i', 'wlan0', 'sta', mac], stderr=subprocess.PIPE).decode()
+                    
+                    # Initialize default values
+                    client_info = {
+                        'mac': mac,
+                        'ip': 'Unknown',
+                        'hostname': 'Unknown',
+                        'connected_since': current_time,
+                        'rx_mb': 0,
+                        'tx_mb': 0,
+                        'status': 'Connected'
+                    }
+                    
+                    # Parse station info
+                    for info_line in station_info.split('\n'):
+                        if 'rx_bytes=' in info_line:
+                            rx_bytes = int(info_line.split('=')[1])
+                            client_info['rx_mb'] = round(rx_bytes / (1024 * 1024), 2)
+                        elif 'tx_bytes=' in info_line:
+                            tx_bytes = int(info_line.split('=')[1])
+                            client_info['tx_mb'] = round(tx_bytes / (1024 * 1024), 2)
+                        elif 'connected_time=' in info_line:
+                            connected_time = int(info_line.split('=')[1])
+                            client_info['connected_since'] = current_time - connected_time
+                    
+                    # Try to get IP and hostname from dnsmasq leases
+                    if os.path.exists('/var/lib/misc/dnsmasq.leases'):
+                        with open('/var/lib/misc/dnsmasq.leases', 'r') as f:
+                            for lease in f:
+                                lease_parts = lease.strip().split()
+                                if len(lease_parts) >= 4 and lease_parts[1].lower() == mac.lower():
+                                    client_info['ip'] = lease_parts[2]
+                                    client_info['hostname'] = lease_parts[3]
+                                    break
+                    
+                    result.append(client_info)
+                    print(f"[DEBUG] Added connected client: {client_info}")
+            
+            # If no stations found, check if we at least have DHCP leases
+            if not result and os.path.exists('/var/lib/misc/dnsmasq.leases'):
+                with open('/var/lib/misc/dnsmasq.leases', 'r') as f:
+                    for lease in f:
+                        lease_parts = lease.strip().split()
+                        if len(lease_parts) >= 4:
+                            try:
+                                lease_time = int(lease_parts[0])
+                                # Only show recent leases (last 24 hours)
+                                if current_time - lease_time <= 86400:
+                                    result.append({
+                                        'mac': lease_parts[1],
+                                        'ip': lease_parts[2],
+                                        'hostname': lease_parts[3],
+                                        'connected_since': lease_time,
+                                        'rx_mb': 0,
+                                        'tx_mb': 0,
+                                        'status': 'Disconnected'
+                                    })
+                            except (ValueError, IndexError):
                                 continue
-                            
-                            # Check if client is currently connected
-                            is_connected = mac in connected_macs
-                            connected_info = connected_macs.get(mac, {})
-                            
-                            # Only show entries from the last 24 hours
-                            if current_time - lease_time <= 86400:
-                                client_info = {
-                                    'mac': mac,
-                                    'ip': ip,
-                                    'hostname': hostname,
-                                    'connected_since': connected_info.get('connected_since', lease_time) if is_connected else lease_time,
-                                    'rx_mb': connected_info.get('rx_mb', 0),
-                                    'tx_mb': connected_info.get('tx_mb', 0),
-                                    'status': 'Connected' if is_connected else 'Disconnected'
-                                }
-                                result.append(client_info)
-                                print(f"[DEBUG] Added client {mac} (Connected: {is_connected}, Lease time: {lease_time})")
-                        except (ValueError, TypeError) as e:
-                            print(f"[DEBUG] Skipping invalid lease entry: {line} ({str(e)})")
-                            continue
-
+        
+        except subprocess.CalledProcessError as e:
+            print(f"[DEBUG] Error executing hostapd_cli: {e}")
+            print(f"[DEBUG] Error output: {e.stderr.decode() if e.stderr else 'None'}")
+            # Don't return immediately, still try to get DHCP leases
+        
         print(f"[DEBUG] Returning {len(result)} clients")
         return jsonify(result)
+    
     except Exception as e:
-        print(f"[DEBUG] Error in connections_api: {str(e)}")
-        print(f"[DEBUG] Error type: {type(e)}")
+        print(f"[DEBUG] Unexpected error in connections_api: {str(e)}")
         import traceback
         print(f"[DEBUG] Traceback: {traceback.format_exc()}")
         return jsonify([])
