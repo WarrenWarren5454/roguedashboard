@@ -9,6 +9,12 @@ import re
 import time
 import json
 from threading import Lock
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('werkzeug')
+logger.setLevel(logging.ERROR)  # Disable Flask's default logging
 
 app = Flask(__name__, static_folder='static')  # Set the static folder explicitly
 CORS(app)  # Enable CORS for development
@@ -150,18 +156,15 @@ def update_connection_status(log_entry):
                         'tx_mb': 0,
                         'status': 'Connected'
                     })
-                print(f"[DEBUG] Client connected: {mac}")
             
             # Check for disconnection (DEAUTH)
-            elif 'DEAUTH' in log_entry:
-                # Mark client as disconnected
+            elif 'DEAUTH' in log_entry or 'timeout_next=DEAUTH' in log_entry:
+                # Mark client as disconnected but keep the original connection time
                 for conn in connections:
                     if conn['mac'] == mac:
                         conn['status'] = 'Disconnected'
-                        print(f"[DEBUG] Client disconnected: {mac}")
                 
                 # Remove clients that have been disconnected for more than 24 hours
-                current_time = int(time.time())
                 connections = [
                     c for c in connections 
                     if not (c['status'] == 'Disconnected' and current_time - c['connected_since'] > 86400)
@@ -185,15 +188,12 @@ def update_connection_status(log_entry):
                 json.dump(connections, f)
                 
         except Exception as e:
-            print(f"[DEBUG] Error updating connections: {e}")
-            import traceback
-            print(f"[DEBUG] Traceback: {traceback.format_exc()}")
+            print(f"Error updating connections: {e}")
 
 @app.route('/api/log', methods=['POST'])
 def log_hostapd():
     try:
         log_entry = request.get_data(as_text=True)
-        print(f"[DEBUG] Received log entry: {log_entry}")
         
         # Append to log file
         with open(HOSTAPD_LOG, 'a') as f:
@@ -204,7 +204,6 @@ def log_hostapd():
         
         return jsonify({'status': 'ok'})
     except Exception as e:
-        print(f"[DEBUG] Error in log_hostapd: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/connections')
@@ -217,7 +216,6 @@ def connections_api():
                 return jsonify(sorted(connections, key=lambda x: (x['status'] == 'Disconnected', -x['connected_since'])))
             return jsonify([])
     except Exception as e:
-        print(f"[DEBUG] Error in connections_api: {e}")
         return jsonify([])
 
 # Event handlers for hostapd events
@@ -310,4 +308,4 @@ if __name__ == '__main__':
     print(f"Templates directory: {os.path.abspath('templates')}")
     print(f"Static directory: {os.path.abspath('static')}")
     print(f"React build directory: {os.path.abspath('frontend/build')}")
-    app.run(host='0.0.0.0', port=443, ssl_context=('cert.crt', 'cert.key'), debug=True)
+    app.run(host='0.0.0.0', port=443, ssl_context=('cert.crt', 'cert.key'), debug=False)

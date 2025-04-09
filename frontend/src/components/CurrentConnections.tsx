@@ -42,8 +42,18 @@ export const CurrentConnections: React.FC = () => {
   }, []);
 
   const formatTimestamp = (timestamp: number) => {
+    if (!timestamp || timestamp < 0) {
+      return 'Unknown';
+    }
+    
     const date = new Date(timestamp * 1000);
     const now = new Date();
+    
+    // Check if the timestamp is valid
+    if (isNaN(date.getTime())) {
+      return 'Invalid Date';
+    }
+    
     const diffSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
     
     if (diffSeconds < 60) {
