@@ -7,9 +7,29 @@ import ast
 import subprocess
 import re
 import time
+import json
+from threading import Lock
 
 app = Flask(__name__, static_folder='static')  # Set the static folder explicitly
 CORS(app)  # Enable CORS for development
+
+# Global variables for connection tracking
+HOSTAPD_LOG = 'hostapd.log'
+CONNECTIONS_FILE = 'connections.json'
+connections_lock = Lock()
+
+# Initialize or clear log files on startup
+def init_log_files():
+    # Clear hostapd log
+    with open(HOSTAPD_LOG, 'w') as f:
+        f.write('')
+    
+    # Initialize connections file with empty list
+    with open(CONNECTIONS_FILE, 'w') as f:
+        json.dump([], f)
+
+# Initialize files on startup
+init_log_files()
 
 # Global dictionary to track connected clients
 connected_clients = {}
@@ -75,108 +95,122 @@ def creds_api():
             print(f"Error reading credentials file: {e}")
     return jsonify(entries)
 
+def update_connection_status(log_entry):
+    with connections_lock:
+        try:
+            # Read current connections
+            with open(CONNECTIONS_FILE, 'r') as f:
+                connections = json.load(f)
+            
+            # Extract MAC address from log entry
+            mac_match = re.search(r'([0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2})', log_entry)
+            if not mac_match:
+                return
+            
+            mac = mac_match.group(1).lower()
+            current_time = int(time.time())
+            
+            # Check for connection (AUTH, ASSOC, AUTHORIZED)
+            if '[AUTH][ASSOC][AUTHORIZED]' in log_entry:
+                # Get IP and hostname from DHCP leases
+                ip = 'Unknown'
+                hostname = 'Unknown'
+                if os.path.exists('/var/lib/misc/dnsmasq.leases'):
+                    with open('/var/lib/misc/dnsmasq.leases', 'r') as f:
+                        for line in f:
+                            parts = line.strip().split()
+                            if len(parts) >= 4 and parts[1].lower() == mac:
+                                ip = parts[2]
+                                hostname = parts[3]
+                                break
+                
+                # Add or update connection
+                existing = next((c for c in connections if c['mac'] == mac), None)
+                if existing:
+                    existing.update({
+                        'ip': ip,
+                        'hostname': hostname,
+                        'connected_since': current_time,
+                        'status': 'Connected'
+                    })
+                else:
+                    connections.append({
+                        'mac': mac,
+                        'ip': ip,
+                        'hostname': hostname,
+                        'connected_since': current_time,
+                        'rx_mb': 0,
+                        'tx_mb': 0,
+                        'status': 'Connected'
+                    })
+                print(f"[DEBUG] Client connected: {mac}")
+            
+            # Check for disconnection (DEAUTH)
+            elif 'DEAUTH' in log_entry:
+                # Mark client as disconnected
+                for conn in connections:
+                    if conn['mac'] == mac:
+                        conn['status'] = 'Disconnected'
+                        print(f"[DEBUG] Client disconnected: {mac}")
+                
+                # Remove clients that have been disconnected for more than 24 hours
+                current_time = int(time.time())
+                connections = [
+                    c for c in connections 
+                    if not (c['status'] == 'Disconnected' and current_time - c['connected_since'] > 86400)
+                ]
+            
+            # Update data transfer stats for connected clients
+            for conn in connections:
+                if conn['status'] == 'Connected':
+                    try:
+                        info = subprocess.check_output(['sudo', 'hostapd_cli', '-i', 'wlan0', 'sta', conn['mac']], stderr=subprocess.PIPE).decode()
+                        for line in info.split('\n'):
+                            if 'rx_bytes=' in line:
+                                conn['rx_mb'] = round(int(line.split('=')[1]) / (1024 * 1024), 2)
+                            elif 'tx_bytes=' in line:
+                                conn['tx_mb'] = round(int(line.split('=')[1]) / (1024 * 1024), 2)
+                    except subprocess.CalledProcessError:
+                        pass
+            
+            # Save updated connections
+            with open(CONNECTIONS_FILE, 'w') as f:
+                json.dump(connections, f)
+                
+        except Exception as e:
+            print(f"[DEBUG] Error updating connections: {e}")
+            import traceback
+            print(f"[DEBUG] Traceback: {traceback.format_exc()}")
+
+@app.route('/api/log', methods=['POST'])
+def log_hostapd():
+    try:
+        log_entry = request.get_data(as_text=True)
+        print(f"[DEBUG] Received log entry: {log_entry}")
+        
+        # Append to log file
+        with open(HOSTAPD_LOG, 'a') as f:
+            f.write(f"{datetime.now().isoformat()} {log_entry}\n")
+        
+        # Update connection status
+        update_connection_status(log_entry)
+        
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        print(f"[DEBUG] Error in log_hostapd: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @app.route('/api/connections')
 def connections_api():
     try:
-        print("[DEBUG] Starting connections_api()")
-        result = []
-        current_time = int(time.time())
-        connected_macs = set()
-        
-        # First, get all connected stations from hostapd
-        try:
-            output = subprocess.check_output(['sudo', 'hostapd_cli', '-i', 'wlan0', 'all_sta'], stderr=subprocess.PIPE)
-            station_list = output.decode().strip().split('\n')
-            print(f"[DEBUG] Raw station list: {station_list}")
-            
-            # Get list of all connected MAC addresses
-            for line in station_list:
-                if re.match('^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', line):
-                    mac = line.strip().lower()
-                    connected_macs.add(mac)
-                    print(f"[DEBUG] Found connected MAC: {mac}")
-        except subprocess.CalledProcessError as e:
-            print(f"[DEBUG] Error getting stations: {e}")
-            print(f"[DEBUG] Error output: {e.stderr.decode() if e.stderr else 'None'}")
-        
-        # Read and process DHCP leases
-        if os.path.exists('/var/lib/misc/dnsmasq.leases'):
-            try:
-                with open('/var/lib/misc/dnsmasq.leases', 'r') as f:
-                    for line in f:
-                        parts = line.strip().split()
-                        if len(parts) >= 4:
-                            try:
-                                lease_time = int(parts[0])
-                                mac = parts[1].lower()
-                                ip = parts[2]
-                                hostname = parts[3]
-                                
-                                # Skip very old leases
-                                if lease_time < 1577836800:  # Jan 1, 2020
-                                    continue
-                                
-                                # Check if this MAC is currently connected
-                                is_connected = mac in connected_macs
-                                
-                                if is_connected:
-                                    # Get station info for connected clients
-                                    try:
-                                        info = subprocess.check_output(['sudo', 'hostapd_cli', '-i', 'wlan0', 'sta', mac], stderr=subprocess.PIPE).decode()
-                                        rx_bytes = 0
-                                        tx_bytes = 0
-                                        connected_time = 0
-                                        
-                                        for info_line in info.split('\n'):
-                                            if 'rx_bytes=' in info_line:
-                                                rx_bytes = int(info_line.split('=')[1])
-                                            elif 'tx_bytes=' in info_line:
-                                                tx_bytes = int(info_line.split('=')[1])
-                                            elif 'connected_time=' in info_line:
-                                                connected_time = int(info_line.split('=')[1])
-                                        
-                                        client_info = {
-                                            'mac': mac,
-                                            'ip': ip,
-                                            'hostname': hostname,
-                                            'connected_since': current_time - connected_time,
-                                            'rx_mb': round(rx_bytes / (1024 * 1024), 2),
-                                            'tx_mb': round(tx_bytes / (1024 * 1024), 2),
-                                            'status': 'Connected'
-                                        }
-                                    except subprocess.CalledProcessError as e:
-                                        print(f"[DEBUG] Error getting station info for {mac}: {e}")
-                                        continue
-                                else:
-                                    # For disconnected clients, use lease information
-                                    client_info = {
-                                        'mac': mac,
-                                        'ip': ip,
-                                        'hostname': hostname,
-                                        'connected_since': lease_time,
-                                        'rx_mb': 0,
-                                        'tx_mb': 0,
-                                        'status': 'Disconnected'
-                                    }
-                                
-                                # Only show recent disconnected clients (last 24 hours)
-                                if is_connected or (current_time - lease_time <= 86400):
-                                    result.append(client_info)
-                                    print(f"[DEBUG] Added client: {client_info}")
-                                
-                            except (ValueError, IndexError) as e:
-                                print(f"[DEBUG] Error processing lease line: {line.strip()}, Error: {e}")
-                                continue
-            except Exception as e:
-                print(f"[DEBUG] Error reading leases file: {e}")
-        
-        print(f"[DEBUG] Returning {len(result)} clients")
-        return jsonify(sorted(result, key=lambda x: (x['status'] == 'Disconnected', -x['connected_since'])))
-        
+        with connections_lock:
+            if os.path.exists(CONNECTIONS_FILE):
+                with open(CONNECTIONS_FILE, 'r') as f:
+                    connections = json.load(f)
+                return jsonify(sorted(connections, key=lambda x: (x['status'] == 'Disconnected', -x['connected_since'])))
+            return jsonify([])
     except Exception as e:
-        print(f"[DEBUG] Unexpected error in connections_api: {str(e)}")
-        import traceback
-        print(f"[DEBUG] Traceback: {traceback.format_exc()}")
+        print(f"[DEBUG] Error in connections_api: {e}")
         return jsonify([])
 
 # Event handlers for hostapd events

