@@ -81,31 +81,42 @@ def connections_api():
         print("[DEBUG] Starting connections_api()")
         result = []
         current_time = int(time.time())
+        connected_macs = {}
         
         # Get current connected stations from hostapd
         try:
             output = subprocess.check_output(['sudo', 'hostapd_cli', '-i', 'wlan0', 'all_sta'], stderr=subprocess.PIPE)
-            connected_macs = {}
-            for line in output.decode().strip().split('\n'):
+            station_list = output.decode().strip().split('\n')
+            print(f"[DEBUG] Raw station list: {station_list}")
+            
+            for line in station_list:
                 if re.match('^([0-9A-Fa-f:]{17})', line):
                     mac = line.strip()
                     # Get station info
-                    info = subprocess.check_output(['sudo', 'hostapd_cli', '-i', 'wlan0', 'sta', mac], stderr=subprocess.PIPE).decode()
-                    rx_bytes = 0
-                    tx_bytes = 0
-                    for info_line in info.split('\n'):
-                        if 'rx_bytes=' in info_line:
-                            rx_bytes = int(info_line.split('=')[1])
-                        elif 'tx_bytes=' in info_line:
-                            tx_bytes = int(info_line.split('=')[1])
-                    connected_macs[mac] = {
-                        'rx_mb': round(rx_bytes / (1024 * 1024), 2),
-                        'tx_mb': round(tx_bytes / (1024 * 1024), 2)
-                    }
-                    print(f"[DEBUG] Found connected station: {mac} (RX: {rx_bytes} bytes, TX: {tx_bytes} bytes)")
+                    try:
+                        info = subprocess.check_output(['sudo', 'hostapd_cli', '-i', 'wlan0', 'sta', mac], stderr=subprocess.PIPE).decode()
+                        rx_bytes = 0
+                        tx_bytes = 0
+                        connected_time = 0
+                        for info_line in info.split('\n'):
+                            if 'rx_bytes=' in info_line:
+                                rx_bytes = int(info_line.split('=')[1])
+                            elif 'tx_bytes=' in info_line:
+                                tx_bytes = int(info_line.split('=')[1])
+                            elif 'connected_time=' in info_line:
+                                connected_time = int(info_line.split('=')[1])
+                        
+                        connected_macs[mac] = {
+                            'rx_mb': round(rx_bytes / (1024 * 1024), 2),
+                            'tx_mb': round(tx_bytes / (1024 * 1024), 2),
+                            'connected_since': current_time - connected_time
+                        }
+                        print(f"[DEBUG] Found connected station: {mac} (RX: {rx_bytes} bytes, TX: {tx_bytes} bytes, Connected: {connected_time}s)")
+                    except subprocess.CalledProcessError as e:
+                        print(f"[DEBUG] Error getting station info: {e}")
+                        continue
         except subprocess.CalledProcessError as e:
             print(f"[DEBUG] Error getting stations from hostapd: {e}")
-            connected_macs = {}
         
         # Get DHCP leases
         if os.path.exists('/var/lib/misc/dnsmasq.leases'):
@@ -124,6 +135,7 @@ def connections_api():
                             
                             # Check if client is currently connected
                             is_connected = mac in connected_macs
+                            connected_info = connected_macs.get(mac, {})
                             
                             # Only show entries from the last 24 hours
                             if current_time - lease_time <= 86400:
@@ -131,13 +143,13 @@ def connections_api():
                                     'mac': mac,
                                     'ip': ip,
                                     'hostname': hostname,
-                                    'connected_since': lease_time,
-                                    'rx_mb': connected_macs.get(mac, {}).get('rx_mb', 0),
-                                    'tx_mb': connected_macs.get(mac, {}).get('tx_mb', 0),
+                                    'connected_since': connected_info.get('connected_since', lease_time) if is_connected else lease_time,
+                                    'rx_mb': connected_info.get('rx_mb', 0),
+                                    'tx_mb': connected_info.get('tx_mb', 0),
                                     'status': 'Connected' if is_connected else 'Disconnected'
                                 }
                                 result.append(client_info)
-                                print(f"[DEBUG] Added client {mac} (Connected: {is_connected})")
+                                print(f"[DEBUG] Added client {mac} (Connected: {is_connected}, Lease time: {lease_time})")
                         except (ValueError, TypeError) as e:
                             print(f"[DEBUG] Skipping invalid lease entry: {line} ({str(e)})")
                             continue
