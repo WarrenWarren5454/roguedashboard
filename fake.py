@@ -85,15 +85,27 @@ def connections_api():
         # Get current connected stations from hostapd
         try:
             output = subprocess.check_output(['sudo', 'hostapd_cli', '-i', 'wlan0', 'all_sta'], stderr=subprocess.PIPE)
-            connected_macs = set()
+            connected_macs = {}
             for line in output.decode().strip().split('\n'):
                 if re.match('^([0-9A-Fa-f:]{17})', line):
                     mac = line.strip()
-                    connected_macs.add(mac)
-                    print(f"[DEBUG] Found connected station: {mac}")
+                    # Get station info
+                    info = subprocess.check_output(['sudo', 'hostapd_cli', '-i', 'wlan0', 'sta', mac], stderr=subprocess.PIPE).decode()
+                    rx_bytes = 0
+                    tx_bytes = 0
+                    for info_line in info.split('\n'):
+                        if 'rx_bytes=' in info_line:
+                            rx_bytes = int(info_line.split('=')[1])
+                        elif 'tx_bytes=' in info_line:
+                            tx_bytes = int(info_line.split('=')[1])
+                    connected_macs[mac] = {
+                        'rx_mb': round(rx_bytes / (1024 * 1024), 2),
+                        'tx_mb': round(tx_bytes / (1024 * 1024), 2)
+                    }
+                    print(f"[DEBUG] Found connected station: {mac} (RX: {rx_bytes} bytes, TX: {tx_bytes} bytes)")
         except subprocess.CalledProcessError as e:
             print(f"[DEBUG] Error getting stations from hostapd: {e}")
-            connected_macs = set()
+            connected_macs = {}
         
         # Get DHCP leases
         if os.path.exists('/var/lib/misc/dnsmasq.leases'):
@@ -120,8 +132,8 @@ def connections_api():
                                     'ip': ip,
                                     'hostname': hostname,
                                     'connected_since': lease_time,
-                                    'rx_mb': connected_clients.get(mac, {}).get('rx_mb', 0),
-                                    'tx_mb': connected_clients.get(mac, {}).get('tx_mb', 0),
+                                    'rx_mb': connected_macs.get(mac, {}).get('rx_mb', 0),
+                                    'tx_mb': connected_macs.get(mac, {}).get('tx_mb', 0),
                                     'status': 'Connected' if is_connected else 'Disconnected'
                                 }
                                 result.append(client_info)

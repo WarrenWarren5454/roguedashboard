@@ -9,17 +9,17 @@ import {
   Paper,
   Typography,
   Box,
+  Chip,
 } from '@mui/material';
 
 interface Connection {
-  mac_address: string;
-  ip_address: string;
+  mac: string;
+  ip: string;
   hostname: string;
-  lease_timestamp: string;
-  connection_duration: string;
-  signal_dbm: string;
+  connected_since: number;
   rx_mb: number;
   tx_mb: number;
+  status: string;
 }
 
 export const CurrentConnections: React.FC = () => {
@@ -41,6 +41,11 @@ export const CurrentConnections: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
+  const formatTimestamp = (timestamp: number) => {
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleString();
+  };
+
   return (
     <Box sx={{ py: 4 }}>
       <Typography variant="h4" component="h1" gutterBottom>
@@ -50,29 +55,40 @@ export const CurrentConnections: React.FC = () => {
         <Table>
           <TableHead>
             <TableRow sx={{ bgcolor: '#c8102e' }}>
+              <TableCell sx={{ color: 'white' }}>Status</TableCell>
               <TableCell sx={{ color: 'white' }}>MAC Address</TableCell>
               <TableCell sx={{ color: 'white' }}>IP Address</TableCell>
               <TableCell sx={{ color: 'white' }}>Hostname</TableCell>
-              <TableCell sx={{ color: 'white' }}>Connected For</TableCell>
-              <TableCell sx={{ color: 'white' }}>Signal</TableCell>
+              <TableCell sx={{ color: 'white' }}>Connected Since</TableCell>
               <TableCell sx={{ color: 'white' }}>Data Received</TableCell>
               <TableCell sx={{ color: 'white' }}>Data Sent</TableCell>
-              <TableCell sx={{ color: 'white' }}>Last DHCP Lease</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {connections.map((conn, index) => (
               <TableRow key={index} sx={{ '&:nth-of-type(even)': { bgcolor: '#f2f2f2' } }}>
-                <TableCell>{conn.mac_address}</TableCell>
-                <TableCell>{conn.ip_address}</TableCell>
+                <TableCell>
+                  <Chip 
+                    label={conn.status} 
+                    color={conn.status === 'Connected' ? 'success' : 'default'}
+                    size="small"
+                  />
+                </TableCell>
+                <TableCell>{conn.mac}</TableCell>
+                <TableCell>{conn.ip}</TableCell>
                 <TableCell>{conn.hostname}</TableCell>
-                <TableCell>{conn.connection_duration || 'N/A'}</TableCell>
-                <TableCell>{conn.signal_dbm || 'N/A'}</TableCell>
-                <TableCell>{conn.rx_mb ? `${conn.rx_mb} MB` : 'N/A'}</TableCell>
-                <TableCell>{conn.tx_mb ? `${conn.tx_mb} MB` : 'N/A'}</TableCell>
-                <TableCell>{new Date(conn.lease_timestamp).toLocaleString()}</TableCell>
+                <TableCell>{formatTimestamp(conn.connected_since)}</TableCell>
+                <TableCell>{conn.rx_mb ? `${conn.rx_mb.toFixed(2)} MB` : 'N/A'}</TableCell>
+                <TableCell>{conn.tx_mb ? `${conn.tx_mb.toFixed(2)} MB` : 'N/A'}</TableCell>
               </TableRow>
             ))}
+            {connections.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={7} align="center">
+                  No connections found
+                </TableCell>
+              </TableRow>
+            )}
           </TableBody>
         </Table>
       </TableContainer>
