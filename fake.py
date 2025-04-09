@@ -121,7 +121,6 @@ def update_connection_status(log_entry):
                 return
             
             mac = mac_match.group(1).lower()
-            current_time = int(time.time())
             
             # Check for connection (AUTH, ASSOC, AUTHORIZED)
             if '[AUTH][ASSOC][AUTHORIZED]' in log_entry:
@@ -137,70 +136,32 @@ def update_connection_status(log_entry):
                                 hostname = parts[3]
                                 break
                 
-                # Get station info to get connected_time
-                try:
-                    info = subprocess.check_output(['sudo', 'hostapd_cli', '-i', 'wlan0', 'sta', mac], stderr=subprocess.PIPE).decode()
-                    connected_time = 0
-                    rx_bytes = 0
-                    tx_bytes = 0
-                    
-                    for line in info.split('\n'):
-                        if 'connected_time=' in line:
-                            connected_time = int(line.split('=')[1])
-                        elif 'rx_bytes=' in line:
-                            rx_bytes = int(line.split('=')[1])
-                        elif 'tx_bytes=' in line:
-                            tx_bytes = int(line.split('=')[1])
-                    
-                    # Add or update connection
-                    existing = next((c for c in connections if c['mac'] == mac), None)
-                    if existing:
-                        existing.update({
-                            'ip': ip,
-                            'hostname': hostname,
-                            'connected_since': current_time - connected_time,
-                            'rx_mb': round(rx_bytes / (1024 * 1024), 2),
-                            'tx_mb': round(tx_bytes / (1024 * 1024), 2),
-                            'status': 'Connected'
-                        })
-                    else:
-                        connections.append({
-                            'mac': mac,
-                            'ip': ip,
-                            'hostname': hostname,
-                            'connected_since': current_time - connected_time,
-                            'rx_mb': round(rx_bytes / (1024 * 1024), 2),
-                            'tx_mb': round(tx_bytes / (1024 * 1024), 2),
-                            'status': 'Connected'
-                        })
-                except subprocess.CalledProcessError:
-                    pass
+                # Add or update connection
+                existing = next((c for c in connections if c['mac'] == mac), None)
+                if existing:
+                    existing.update({
+                        'mac': mac,
+                        'ip': ip,
+                        'hostname': hostname,
+                        'status': 'Connected'
+                    })
+                else:
+                    connections.append({
+                        'mac': mac,
+                        'ip': ip,
+                        'hostname': hostname,
+                        'status': 'Connected'
+                    })
             
             # Check for disconnection (DEAUTH)
             elif 'DEAUTH' in log_entry or 'timeout_next=DEAUTH' in log_entry:
-                # Mark client as disconnected but keep the original connection time
+                # Mark client as disconnected
                 for conn in connections:
                     if conn['mac'] == mac:
                         conn['status'] = 'Disconnected'
                 
-                # Remove clients that have been disconnected for more than 24 hours
-                connections = [
-                    c for c in connections 
-                    if not (c['status'] == 'Disconnected' and current_time - c['connected_since'] > 86400)
-                ]
-            
-            # Update data transfer stats for connected clients
-            for conn in connections:
-                if conn['status'] == 'Connected':
-                    try:
-                        info = subprocess.check_output(['sudo', 'hostapd_cli', '-i', 'wlan0', 'sta', conn['mac']], stderr=subprocess.PIPE).decode()
-                        for line in info.split('\n'):
-                            if 'rx_bytes=' in line:
-                                conn['rx_mb'] = round(int(line.split('=')[1]) / (1024 * 1024), 2)
-                            elif 'tx_bytes=' in line:
-                                conn['tx_mb'] = round(int(line.split('=')[1]) / (1024 * 1024), 2)
-                    except subprocess.CalledProcessError:
-                        pass
+                # Remove disconnected clients
+                connections = [c for c in connections if c['status'] == 'Connected']
             
             # Save updated connections
             with open(CONNECTIONS_FILE, 'w') as f:
@@ -232,7 +193,7 @@ def connections_api():
             if os.path.exists(CONNECTIONS_FILE):
                 with open(CONNECTIONS_FILE, 'r') as f:
                     connections = json.load(f)
-                return jsonify(sorted(connections, key=lambda x: (x['status'] == 'Disconnected', -x['connected_since'])))
+                return jsonify(connections)
             return jsonify([])
     except Exception as e:
         return jsonify([])
